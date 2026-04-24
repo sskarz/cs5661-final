@@ -1,0 +1,20 @@
+[project]
+name = "cs5661-final"
+version = "0.1.0"
+description = "Mobile UI Agent: Benchmark → SFT + RL on Gemma 4 E2B"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "datasets",
+    "pillow",
+    "pyarrow",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+train = [
+    "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git",
+    "xformers",
+    "bitsandbytes",
+    "trl",
+]

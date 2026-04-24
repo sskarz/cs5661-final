@@ -1,0 +1,100 @@
+# Mobile UI Agent: Benchmark → SFT + RL Plan
+
+## Overview
+Benchmark, fine-tune, and reinforce-learn a **Gemma 4 E2B** model on its ability to traverse mobile UIs — using your RTX 4090 for training and a Mac (MLX, 8-bit) for deployment.
+
+---
+
+## Step 0 — Baseline (Before Any Training)
+Set up the benchmark environment first. You can't measure improvement without a number.
+
+### Best Benchmarks
+| Benchmark | What It Is | Why Use It |
+|---|---|---|
+| **AndroidWorld** — 116 live tasks across 20 real apps, running in a real Android emulator. Dynamic — screens change, dialogs appear. | Gold standard for *dynamic* evaluation. |
+| **AndroidControl** — ~15k human-annotated action traces. Clean, labeled. | Great for SFT training data. |
+| **AITW (Android-in-the-Wild)** — ~715k episodes, noisier but massive scale. | SFT scale-up later. |
+| **GAMBIT** — graph-structured benchmark testing multi-step, branching tasks (830 episodes). | Tests long-horizon planning. |
+
+**Action:** Run your base Gemma 4 E2B on AndroidWorld using a mobile-use style agent harness. Record the success rate — that's your baseline.
+
+---
+
+## Step 1 — Data: Where to Get It & How to Structure It
+The "mobile-use" repo is a *framework*, not a dataset. For training data, use:
+
+| Source | Size | Use For |
+|---|---|---|
+| **AndroidControl** (~15k episodes) | Clean, human-annotated action traces | SFT — start here |
+| **AITW** (~715k episodes) | Massive but noisier | SFT scale-up later |
+| **AMEX** (multi-level annotations) | Better grounding quality | SFT quality boost |
+| **AndroidWorld** (116 live tasks) | Live emulator environment | Benchmark + RL rollouts |
+
+### Data Format
+Structure each SFT sample as:
+
+```json
+{
+  "messages": [
+    {"role": "user", "content": [{"type": "image", "image": "screenshot.png"}, {"type": "text", "text": "Send a photo to contact Alice"}]},
+    {"role": "assistant", "content": "{\"action\": \"tap\", \"x\": 0.54, \"y\": 0.73}"}
+  ]
+}
+```
+
+### Key Rules
+- Normalize coordinates to **0–1** (not raw pixels — screens vary)
+- Let the model output a sequence of actions until it says `{"action": "done"}`
+- AndroidControl already ships in close-to-this shape — use it directly
+
+---
+
+## Step 2 — Training: Use Your RTX 4090, Not the Mac
+**Unsloth on your 4090 is the right call.**
+
+### Why Unsloth + 4090?
+- Unsloth has **first-class Gemma 4 E2B vision LoRA support** via `FastVisionModel`
+- You can finetune vision layers, language layers, attention modules, and MLP independently
+- 24GB VRAM is enough for QLoRA (4-bit base) with rank 16–32
+- Typical recipe: QLoRA, r=16, alpha=32, lr=2e-4, 1–3 epochs on AndroidControl
+- MLX is great for *inference* — after training, convert with `mlx_lm.convert` to 8-bit for your Mac
+
+### Important
+**Do NOT train on the pre-quantized MLX checkpoint.** Train LoRA on bf16 weights, then quantize for deployment.
+
+---
+
+## Step 3 — RL: Start Simple with DPO
+Unsloth supports both **DPO** and **GRPO** for vision models.
+
+### Phase 1 — DPO (offline, easiest)
+- Roll out your SFT model on AndroidWorld tasks
+- Collect trajectories: "completed task" = chosen, "failed task" = rejected
+- Train with Unsloth's DPOTrainer — same 4090, a few hours
+- Biggest quality win for lowest complexity
+
+### Phase 2 — GRPO (online, only if DPL plateaus)
+- Unsloth has a `Mobile Actions` notebook with GRPO for vision models
+- Reward = task success in AndroidWorld (binary) + shaping for progress
+- Requires a running emulator loop — real engineering work
+- There's also **Mobile-R1** (a paper/framework using interactive multi-turn RL with task-level rewards for mobile agents) — worth reading
+
+### Skip PPO
+For a 2B-class model on UI tasks, DPO + GRPO is more than enough. PPO adds a value network and is overkill when success/fail is already a clean signal.
+
+---
+
+## Your Concrete Sequence
+1. **Confirm model** = `google/gemma-4-e2b-it` (you're right — it exists!)
+2. **Set up AndroidWorld** emulator → run eval on base model → record baseline
+3. **Download AndroidControl**, format as (image + instruction → action sequence JSON)
+4. **SFT with Unsloth QLoRA** on 4090 (1–3 epochs, r=16)
+5. **Re-run AndroidWorld eval** — measure Δ vs baseline
+6. **Generate rollout pairs → DPO** with Unsloth → re-eval
+7. **Merge LoRA, convert to MLX 8-bit** for Mac inference
+8. **(Optional) GRPO** if DPL plateaus — use Unsloth's Mobile Actions notebook
+
+### Sanity Checks
+- If your baseline is near 0% on AndroidWorld, fix the agent harness before training — a broken pipeline won't improve with more data
+- Log action-format validity separately from task success; malformed JSON = 0% for reasons unrelated to UI understanding
+- Start by finetuning only the language layers first, enable vision layers once the pipeline is stable
