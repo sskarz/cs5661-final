@@ -42,7 +42,9 @@ hardcoding any single resolution.
     },
     {
       "role": "assistant",
-      "content": "{\"action\": \"tap\", \"x\": 0.5, \"y\": 0.73}"
+      "content": [
+        {"type": "text", "text": "{\"action\": \"tap\", \"x\": 0.5, \"y\": 0.73}"}
+      ]
     }
   ],
   "episode_id": "12345",

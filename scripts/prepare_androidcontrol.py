@@ -29,8 +29,10 @@ Schema notes (verified against smolagents/android-control 2026-04):
 import argparse
 import base64
 import json
+import os
 import sys
 from io import BytesIO
+from multiprocessing import Pool
 from pathlib import Path
 
 import itertools
@@ -128,10 +130,11 @@ def build_sample(
         user_content.append({"type": "image"})
     user_content.append({"type": "text", "text": instruction})
 
+    assistant_content = [{"type": "text", "text": json.dumps(action_obj)}]
     row = {
         "messages": [
             {"role": "user", "content": user_content},
-            {"role": "assistant", "content": json.dumps(action_obj)},
+            {"role": "assistant", "content": assistant_content},
         ],
         "episode_id": episode_id,
         "step_index": step_index,
@@ -222,6 +225,21 @@ def process_episode(episode: dict, output_dir: Path) -> list[dict]:
     return rows
 
 
+# Worker globals — populated via Pool initializer to avoid pickling per-task.
+_WORKER_DATASET = None
+_WORKER_OUTPUT_DIR: Path | None = None
+
+
+def _init_worker(dataset, output_dir: Path) -> None:
+    global _WORKER_DATASET, _WORKER_OUTPUT_DIR
+    _WORKER_DATASET = dataset
+    _WORKER_OUTPUT_DIR = output_dir
+
+
+def _process_idx(idx: int) -> list[dict]:
+    return process_episode(_WORKER_DATASET[idx], _WORKER_OUTPUT_DIR)
+
+
 def write_jsonl(split_name: str, rows: list[dict], output_dir: Path) -> Path:
     jsonl_path = output_dir / f"{split_name}.jsonl"
     rows.sort(key=lambda r: (int(r["episode_id"]), r["step_index"], r["granularity"]))
@@ -306,6 +324,11 @@ def main():
     parser.add_argument(
         "--fetch-ood-splits", action="store_true", default=False,
     )
+    parser.add_argument(
+        "--num-workers", type=int, default=max(1, (os.cpu_count() or 2) - 2),
+        help="Worker processes for episode decoding. 0 disables multiprocessing "
+             "(serial mode, used automatically for streaming).",
+    )
     args = parser.parse_args()
 
     output_dir: Path = args.output_dir
@@ -334,16 +357,36 @@ def main():
             print(f"FATAL: could not load split '{split_name}': {e}", file=sys.stderr)
             sys.exit(1)
 
-        if use_streaming:
-            iterator = itertools.islice(split, args.max_episodes)
-            print(f"\nSplit '{split_name}': streaming up to {args.max_episodes} episodes")
-        else:
-            iterator = split
-            print(f"\nSplit '{split_name}': {len(split)} episodes")
-
         rows: list[dict] = []
-        for episode in tqdm(iterator, desc=f"  {split_name}", unit="ep"):
-            rows.extend(process_episode(episode, output_dir))
+
+        if use_streaming or args.num_workers <= 0:
+            # Serial path: streaming datasets aren't index-addressable, and the
+            # user can opt out of multiprocessing with --num-workers 0.
+            iterator = (
+                itertools.islice(split, args.max_episodes) if use_streaming else split
+            )
+            mode_desc = (
+                f"streaming up to {args.max_episodes}" if use_streaming
+                else f"{len(split)} episodes (serial)"
+            )
+            print(f"\nSplit '{split_name}': {mode_desc}")
+            for episode in tqdm(iterator, desc=f"  {split_name}", unit="ep"):
+                rows.extend(process_episode(episode, output_dir))
+        else:
+            n = len(split)
+            print(f"\nSplit '{split_name}': {n} episodes "
+                  f"({args.num_workers} workers)")
+            with Pool(
+                processes=args.num_workers,
+                initializer=_init_worker,
+                initargs=(split, output_dir),
+            ) as pool:
+                for ep_rows in tqdm(
+                    pool.imap_unordered(_process_idx, range(n), chunksize=4),
+                    total=n, desc=f"  {split_name}", unit="ep",
+                ):
+                    rows.extend(ep_rows)
+
         split_results[split_name] = rows
 
     print("\nWriting JSONL files:")

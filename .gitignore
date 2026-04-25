@@ -66,6 +66,10 @@ hf_cache/
 # Notebooks scratch
 *-checkpoint.ipynb
 
+# Tooling caches
+unsloth_compiled_cache/
+.claude/
+
 # Env / secrets
 .env
 .env.*

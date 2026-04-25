@@ -19,9 +19,9 @@ produced by scripts/prepare_androidcontrol.py.
 """
 
 import argparse
+import json
 from pathlib import Path
 
-from datasets import load_dataset
 from PIL import Image
 
 
@@ -36,7 +36,9 @@ def to_unsloth_format(row: dict, data_dir: Path) -> dict:
     user_text = next(
         c["text"] for c in row["messages"][0]["content"] if c["type"] == "text"
     )
-    assistant_text = row["messages"][1]["content"]
+    assistant_text = next(
+        c["text"] for c in row["messages"][1]["content"] if c["type"] == "text"
+    )
 
     return {
         "messages": [
@@ -80,11 +82,12 @@ def main():
             f"Missing {train_jsonl}. Run scripts/prepare_androidcontrol.py first."
         )
 
-    # Lazy imports — these require the [train] extra (CUDA-only)
-    import torch
-    from trl import SFTConfig, SFTTrainer
+    # Lazy imports — these require the [train] extra (CUDA-only).
+    # Unsloth must be imported before trl/transformers/peft so its patches apply.
     from unsloth import FastVisionModel
     from unsloth.trainer import UnslothVisionDataCollator
+    import torch
+    from trl import SFTConfig, SFTTrainer
 
     print(f"Loading {args.model} (4-bit QLoRA)...")
     model, processor = FastVisionModel.from_pretrained(
@@ -96,36 +99,44 @@ def main():
     print(f"Attaching LoRA adapters (r={args.lora_r}, alpha={args.lora_alpha})...")
     model = FastVisionModel.get_peft_model(
         model,
+        finetune_vision_layers=True,
+        finetune_language_layers=True,
+        finetune_attention_modules=True,
+        finetune_mlp_modules=True,
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=0,
         bias="none",
         random_state=args.seed,
-        target_modules=[
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
-        ],
+        use_rslora=False,
+        loftq_config=None,
+        target_modules="all-linear",
     )
 
     print(f"Loading dataset from {train_jsonl}...")
-    raw = load_dataset("json", data_files=str(train_jsonl), split="train")
-    dataset = raw.map(
-        lambda row: to_unsloth_format(row, args.data_dir),
-        remove_columns=raw.column_names,
-    )
+    # PIL images can't round-trip through Arrow, so we keep the dataset as a
+    # plain torch Dataset that loads images lazily on __getitem__. The Unsloth
+    # vision collator handles tokenization + image encoding at collate time.
+    from torch.utils.data import Dataset as TorchDataset
+
+    class AndroidControlDataset(TorchDataset):
+        def __init__(self, jsonl_path: Path, data_dir: Path):
+            self.data_dir = data_dir
+            with open(jsonl_path) as f:
+                self.rows = [json.loads(line) for line in f]
+
+        def __len__(self):
+            return len(self.rows)
+
+        def __getitem__(self, idx):
+            return to_unsloth_format(self.rows[idx], self.data_dir)
+
+    dataset = AndroidControlDataset(train_jsonl, args.data_dir)
     print(f"  Train rows: {len(dataset)}")
 
     FastVisionModel.for_training(model)
 
-    # Gemma 4 chat-template markers — verify against the Gemma 4 vision notebook
-    # before a long run. If they're wrong, the loss masking is wrong.
-    collator = UnslothVisionDataCollator(
-        model=model,
-        processor=processor,
-        train_on_responses_only=True,
-        instruction_part="<start_of_turn>user\n",
-        response_part="<start_of_turn>model\n",
-    )
+    collator = UnslothVisionDataCollator(model, processor)
 
     sft_kwargs = dict(
         per_device_train_batch_size=args.batch_size,
@@ -156,7 +167,7 @@ def main():
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=processor.tokenizer,
+        processing_class=processor.tokenizer,
         data_collator=collator,
         train_dataset=dataset,
         args=SFTConfig(**sft_kwargs),
