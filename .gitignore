@@ -1,10 +1,74 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
 
 # Virtual environments
-.venv
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+.python-version.local
+
+# Caches
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Datasets and model artifacts (do NOT commit)
+data/
+checkpoints/
+models/
+outputs/
+runs/
+wandb/
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.gguf
+
+# HuggingFace cache (if anyone runs with HF_HOME=.)
+.huggingface/
+hf_cache/
+
+# Notebooks scratch
+*-checkpoint.ipynb
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
