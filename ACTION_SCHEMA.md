@@ -58,5 +58,11 @@ Two granularity modes per step:
 
 ## Terminal Action
 
-The final step of every episode emits `{"action": "done"}`. The agent should stop
-generating actions after this token.
+When the dataset provides a post-action (terminal) screenshot, we emit an
+additional synthetic step with `{"action": "done"}` grounded in that screenshot.
+The real final action is preserved as a normal step — it is *not* overwritten.
+At inference time, the agent should stop generating actions after `done`.
+
+Episodes without a trailing screenshot (about half of AndroidControl) emit no
+explicit `done` sample; the agent learns the stop signal from the episodes that
+do provide one.
