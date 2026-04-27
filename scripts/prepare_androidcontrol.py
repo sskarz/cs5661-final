@@ -47,6 +47,13 @@ HF_REPO = "smolagents/android-control"
 TERMINAL_ACTION = {"action": "done"}
 
 
+def encode_discrete_xy(x: float, y: float, grid: int) -> dict:
+    """Quantize normalized [0,1] coords to discrete <loc_x_K>/<loc_y_K> tokens."""
+    kx = max(0, min(grid - 1, round(x * grid)))
+    ky = max(0, min(grid - 1, round(y * grid)))
+    return {"x": f"<loc_x_{kx}>", "y": f"<loc_y_{ky}>"}
+
+
 def map_action(raw_step: dict, norm_coords: dict | None) -> dict:
     """Convert one raw AndroidControl action into our canonical SFT schema."""
     raw_type = (raw_step.get("action_type") or "").lower().strip()
@@ -146,7 +153,9 @@ def build_sample(
     return row
 
 
-def process_episode(episode: dict, output_dir: Path) -> list[dict]:
+def process_episode(
+    episode: dict, output_dir: Path, coord_encoding: str = "float", grid_size: int = 1024
+) -> list[dict]:
     """Return all SFT rows for one episode (2 per step: goal + step_instruction)."""
     images_dir = output_dir / "images"
 
@@ -179,10 +188,15 @@ def process_episode(episode: dict, output_dir: Path) -> list[dict]:
             y = raw_step.get("y")
             if x is not None and y is not None:
                 w, h = size
-                norm_coords = {
-                    "x": round(x / w, 6),
-                    "y": round(y / h, 6),
-                }
+                nx = max(0.0, min(1.0, x / w))
+                ny = max(0.0, min(1.0, y / h))
+                if coord_encoding == "discrete":
+                    norm_coords = encode_discrete_xy(nx, ny, grid_size)
+                else:
+                    norm_coords = {
+                        "x": round(nx, 6),
+                        "y": round(ny, 6),
+                    }
 
         # Tag for warning messages
         raw_step["_episode_id"] = episode_id
@@ -228,16 +242,27 @@ def process_episode(episode: dict, output_dir: Path) -> list[dict]:
 # Worker globals — populated via Pool initializer to avoid pickling per-task.
 _WORKER_DATASET = None
 _WORKER_OUTPUT_DIR: Path | None = None
+_WORKER_COORD_ENCODING: str = "float"
+_WORKER_GRID_SIZE: int = 1024
 
 
-def _init_worker(dataset, output_dir: Path) -> None:
-    global _WORKER_DATASET, _WORKER_OUTPUT_DIR
+def _init_worker(
+    dataset, output_dir: Path, coord_encoding: str = "float", grid_size: int = 1024
+) -> None:
+    global _WORKER_DATASET, _WORKER_OUTPUT_DIR, _WORKER_COORD_ENCODING, _WORKER_GRID_SIZE
     _WORKER_DATASET = dataset
     _WORKER_OUTPUT_DIR = output_dir
+    _WORKER_COORD_ENCODING = coord_encoding
+    _WORKER_GRID_SIZE = grid_size
 
 
 def _process_idx(idx: int) -> list[dict]:
-    return process_episode(_WORKER_DATASET[idx], _WORKER_OUTPUT_DIR)
+    return process_episode(
+        _WORKER_DATASET[idx],
+        _WORKER_OUTPUT_DIR,
+        coord_encoding=_WORKER_COORD_ENCODING,
+        grid_size=_WORKER_GRID_SIZE,
+    )
 
 
 def write_jsonl(split_name: str, rows: list[dict], output_dir: Path) -> Path:
@@ -329,6 +354,14 @@ def main():
         help="Worker processes for episode decoding. 0 disables multiprocessing "
              "(serial mode, used automatically for streaming).",
     )
+    parser.add_argument(
+        "--coord-encoding", choices=["float", "discrete"], default="float",
+        help="float: emit normalized floats. discrete: emit <loc_x_K>/<loc_y_K> tokens.",
+    )
+    parser.add_argument(
+        "--grid-size", type=int, default=1024,
+        help="Grid resolution per axis when --coord-encoding=discrete.",
+    )
     args = parser.parse_args()
 
     output_dir: Path = args.output_dir
@@ -371,7 +404,13 @@ def main():
             )
             print(f"\nSplit '{split_name}': {mode_desc}")
             for episode in tqdm(iterator, desc=f"  {split_name}", unit="ep"):
-                rows.extend(process_episode(episode, output_dir))
+                rows.extend(
+                    process_episode(
+                        episode, output_dir,
+                        coord_encoding=args.coord_encoding,
+                        grid_size=args.grid_size,
+                    )
+                )
         else:
             n = len(split)
             print(f"\nSplit '{split_name}': {n} episodes "
@@ -379,7 +418,7 @@ def main():
             with Pool(
                 processes=args.num_workers,
                 initializer=_init_worker,
-                initargs=(split, output_dir),
+                initargs=(split, output_dir, args.coord_encoding, args.grid_size),
             ) as pool:
                 for ep_rows in tqdm(
                     pool.imap_unordered(_process_idx, range(n), chunksize=4),

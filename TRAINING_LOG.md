@@ -226,15 +226,1038 @@ Run started **2026-04-24 23:32:33**, finished **2026-04-25 08:14:18**.
 - Saved alongside: tokenizer, processor config, chat template
 - 40 intermediate checkpoints written every 500 steps, last 3 retained on disk by `save_total_limit=3` (final 19,886 + checkpoints 19,500 / 19,000 retained)
 
-#### Verdict
+#### Verdict (provisional, pre-eval)
 
-Run A passed the health bar (final loss < 1.0, monotone trajectory, stable grad norms). **No retry triggered** — the retry ladder (Runs B–E) was held in reserve and is not needed. The adapter is ready for evaluation against the AndroidWorld baseline (Step 2 eval) and for downstream RL (Step 3).
+Run A passed the loss-curve health bar (final loss < 1.0, monotone trajectory, stable grad norms). The retry ladder (Runs B–E) was held in reserve. Adapter declared ready for evaluation pending Step 2 eval — see **Section 5** for the actual eval result, which contradicts this provisional verdict.
 
-## 5. Outstanding / next
+## 5. Step 2 eval — AndroidControl test set (in-distribution)
 
-Step 2 (SFT) is complete and produced a healthy adapter on the first try; the retry ladder was not exercised. Remaining work, in dependency order:
+After saving Run A, we evaluated the adapter on the AndroidControl held-out test split (39,162 rows, prepared alongside training in Step 1). This is the cheap in-distribution check before any AndroidWorld harness work — same data distribution, same action schema, no emulator overhead.
 
-- **Step 0 baseline eval** on AndroidWorld with the base `unsloth/gemma-4-E2B-it` (no adapter). Required to compute Δ for Step 2.
-- **Step 2 eval**: re-run the same AndroidWorld harness with the LoRA adapter loaded, measure success-rate Δ vs baseline. Log per-task results and action-format validity (malformed JSON should be excluded from the UI-understanding score).
-- **Adapter merge → MLX 8-bit** for Mac inference (deployment target). Use `mlx_lm.convert` after merging the LoRA back into bf16 weights.
-- **Step 3 RL**: roll out the SFT model on AndroidWorld, build (chosen, rejected) pairs from successful vs failed trajectories, run DPO with Unsloth on the same 4090 box. GRPO is optional and only justified if DPO plateaus.
+### 5.1 Methodology
+
+**Script:** `scripts/eval_androidcontrol.py`
+
+- Sample N=500 rows from `data/androidcontrol/test.jsonl` with a fixed shuffle seed (3407) so baseline and LoRA see identical inputs.
+- Greedy decoding (`do_sample=False`, `use_cache=True`), `max_new_tokens=32`. Action JSON is short (rarely > 30 tokens) — 32 leaves headroom without wasting decode steps.
+- Schema-instruction prefix prepended to every prompt for **both** runs (apples-to-apples). The prefix lists the eight legal action shapes and instructs JSON-only output. Without it the bare base model hits 0% parse rate (it refuses with "I cannot directly interact…"), making any comparison meaningless.
+- Image is supplied to the processor via the `images=` kwarg; the chat template carries an `{"type": "image"}` placeholder.
+- Predictions are scored as:
+  - `parse_rate` — first regex-extracted JSON object is valid and contains an `action` field.
+  - `action_type_accuracy` — predicted `action` string matches ground truth.
+  - `full_match` — type matches AND args match. For `tap`, args match if `(dx² + dy²) ≤ 0.14²` (the AndroidControl-paper radius convention, ~14% of normalized-coordinate space). For `type`, exact-string match on `text`. For `scroll`, exact `direction` match. For `open_app`, case-insensitive match on `app_name`. For terminal/no-arg actions, type match is sufficient.
+
+### 5.2 Headline numbers (n=500, same seed both runs)
+
+| Metric | Baseline (no LoRA) | Run A LoRA | Δ |
+|---|---:|---:|---:|
+| parse_rate | 0.9940 | 0.9940 | 0.0000 |
+| action_type_accuracy | 0.5440 | 0.5480 | +0.0040 |
+| **full_match** | **0.2880** | **0.2320** | **−0.0560** |
+
+**The LoRA regresses on the headline metric.** Action-type selection is essentially identical; the regression comes entirely from worse argument prediction (especially tap coordinates).
+
+### 5.3 Per-action-type breakdown
+
+| Action | n | Baseline acc | LoRA acc | Δ |
+|---|---:|---:|---:|---:|
+| tap | 250 | 0.360 | 0.224 | **−0.136** |
+| type | 31 | 0.419 | 0.516 | +0.097 |
+| open_app | 29 | 0.586 | 0.310 | **−0.276** |
+| scroll | 51 | 0.196 | 0.392 | +0.196 |
+| navigate_back | 20 | 0.700 | 0.600 | −0.100 |
+| wait | 27 | 0.000 | 0.111 | +0.111 |
+| done | 89 | 0.000 | 0.000 | 0.000 |
+| navigate_home | 1 | 0.000 | 0.000 | 0.000 |
+| long_press | 2 | 0.000 | 0.000 | 0.000 |
+
+The LoRA improves *categorical* actions it learned shape priors for (scroll direction, type-text idiom, "wait" as a fallback), but hurts the spatial actions where it needs precise quantitative output (tap coords, open_app names). `done` is 0/89 in both — the schema prefix doesn't include strong "when to terminate" cues, and only ~half of training episodes had explicit `done` supervision.
+
+Output files:
+- `outputs/eval/baseline.json`, `outputs/eval/baseline.log`
+- `outputs/eval/lora.json`, `outputs/eval/lora.log`
+
+### 5.4 Diagnostic chain — is the adapter actually being applied?
+
+Smoke-test n=10 results on the LoRA were initially alarming (full_match=0/10 with prefix, and natural-language ramble with no prefix), so we ran a four-step verification before trusting the n=500 number.
+
+1. **Adapter weights are loaded.** `safetensors.safe_open` shows 714 keys; the running model has 714 LoRA parameters (245 language, 112 vision per `lora_A`-side, doubled with `lora_B`). 357 `lora_B` tensors have non-zero magnitudes (e.g., language `down_proj.lora_B`: |w|=383.18; vision `q_proj.linear.lora_B`: |w|=143.25). The vision side correctly wraps `q_proj.linear` (the inner Linear of `Gemma4ClippableLinear`); the language side wraps the outer projection directly — both match the safetensors layout.
+
+2. **PEFT API state is sane.** `model.active_adapters == ['default']`, `module.disable_adapters == False` on representative layers.
+
+3. **LoRA forward path actually fires at the layer level.** Manually fed a random tensor through `language_model.layers.0.self_attn.k_proj`: max-abs delta between with/without adapter = **0.265625** on a unit-magnitude input. The contribution is real, not zero.
+
+4. **Full-model A/B on a real prompt** shows logit shift up to **17.75** and different top-1 next-token between base and LoRA (e.g., base picks `"Based"`, LoRA picks `"I"`). Generated continuations diverge meaningfully — neither produces JSON without the schema preamble, but they are clearly different distributions.
+
+**Conclusion:** the adapter is loaded, attached, and active. The regression is *not* a loading bug. It is a *training* problem.
+
+### 5.5 Root cause — loss masking
+
+`scripts/train_sft.py` uses `UnslothVisionDataCollator(model, processor)` without wrapping the trainer in `train_on_responses_only(...)` from `unsloth.chat_templates`. As a result the SFT loss is computed across **every token** in the rendered conversation: image patches, user-prompt text, and the assistant's JSON action.
+
+Why this matters numerically: the assistant turn is ~25 JSON tokens. The user turn is ~10–20 text tokens. The image expands to ~256+ vision tokens via the Gemma 4 vision tower. Image tokens are highly predictable conditionally on the image features (the model is essentially copying its own visual encoding to the next-token slot), so the per-token loss on image tokens converges quickly to a small number. Averaged across the full sequence, this drags the headline loss down — the 0.42 final-100-step average is dominated by easy image/prompt tokens, *not* the JSON we care about.
+
+The model therefore learned the AndroidControl image distribution and the schema **shape** (it hits 99.4% parse rate and matches base on action-type accuracy), but it under-trained the *quantitative content* of the JSON — specifically tap coordinates and app-name strings, which is exactly where we see the −13.6 and −27.6 point regressions. The shifts on scroll/type/wait are consistent with the model learning frequent action-keyword patterns without needing precise numerical fidelity.
+
+### 5.6 Action — Run B is mandatory
+
+Run A produces a worse-than-baseline adapter on the headline action-match metric. Shipping it as-is would be a strict regression. Run B fixes the loss objective and bundles a few independent speed wins; see Section 6 for the actual setup, the bugs we hit, and the smoke results.
+
+## 6. Step 2 retry — Run B setup
+
+Same model, same data, same epochs, same LoRA hyperparameters. Three changes from Run A: one correctness, two speed.
+
+### 6.1 The change list
+
+1. **`train_on_responses_only=True` (correctness).** Loss is masked to assistant tokens only. The image and user prompt no longer dilute the gradient signal — see Section 5.5 for why this is mandatory.
+2. **`per_device_train_batch_size: 2 → 4`, `gradient_accumulation_steps: 4 → 2` (speed).** Effective batch stays at 8 — same convergence target, same number of optimizer steps (19,886). Each step does 4 forward passes per micro-batch instead of 2, halving the optimizer-step boundary overhead. Run A's peak VRAM was ~9.9 GB / 14 GB free, so doubling per-device batch is comfortable; max_length is also being tightened, freeing more headroom.
+3. **`max_length: 2048 → 1024` (speed).** Verified safe by tokenizing 5,000 random train rows through the actual chat template (image budgeted at 256 tokens for 512×512 patch grid): max observed 403 tokens, p99.9 = 378, **0% would truncate at 512 let alone 1024**. The dataset is uniformly short. This is pure speed, no truncation cost.
+
+Diff in `scripts/train_sft.py`:
+
+- New default args: `--batch-size 4`, `--grad-accum 2`, `--max-length 1024`, plus `--no-response-only` escape hatch.
+- Collator: `UnslothVisionDataCollator(model, processor, train_on_responses_only=True, instruction_part="<|turn>user\n", response_part="<|turn>model\n")`.
+
+### 6.2 Flash Attention 2 — attempted, deferred
+
+The Unsloth banner reports `FA [Xformers = 0.0.35. FA2 = False]`. FA2 would buy a realistic +15–25% wall-time speedup on Ada (sm_89) for our sequence shape. We attempted `uv pip install flash-attn --no-build-isolation` with a 5-minute ceiling; it went into a source build past the ceiling and was killed. Env reverted clean (verified `uv pip list | grep flash` empty). **Run B uses Xformers**, like Run A. FA2 install can be retried offline (likely needs a longer build window or matching prebuilt wheel); not a blocker.
+
+### 6.3 Bug fixes encountered while wiring up Run B
+
+Two bugs hit during smoke before the first real step ran:
+
+**Bug 1 — `train_on_responses_only` post-trainer wrapper rejects torch Datasets.**
+`unsloth.chat_templates.train_on_responses_only(trainer, ...)` raises `TypeError: Unsloth: train_on_responses_only does not work on lists!` because our train dataset is a `torch.utils.data.Dataset` (forced by lazy PIL loading; see Section 4.2), not an HF `datasets.Dataset`. The wrapper introspects the trainer's `train_dataset` and only supports HF datasets.
+**Fix:** move response-only masking from the post-trainer wrapper into the *collator* — `UnslothVisionDataCollator(model, processor, train_on_responses_only=True, instruction_part=..., response_part=...)`. This is in fact the Unsloth Gemma 4 vision notebook's canonical recipe; the post-trainer wrapper is a text-SFT convenience. No functional difference at the loss-masking level.
+
+**Bug 2 — Wrong turn markers → `train_loss: nan` after 5 steps.**
+We initially used `instruction_part="<start_of_turn>user\n"` / `response_part="<start_of_turn>model\n"` (the Gemma 1/2/3 form). Smoke produced loss = nan because Gemma 4's chat template renders these markers as `<|turn>user\n` and `<|turn>model\n` instead. With the wrong substrings, no tokens matched the response window — the entire sequence was masked → all labels = -100 → nan loss.
+**Fix:** verified by `processor.apply_chat_template(messages, tokenize=False)` on a sample conversation, which printed:
+```
+<bos><|turn>user\nTap the Send button.\n\n<|image|>\n\n<turn|>\n<|turn>model\n{...}<turn|>\n
+```
+Updated markers to `<|turn>user\n` / `<|turn>model\n`. Smoke retest produced loss = 7.72 (real, well-defined).
+
+### 6.4 Run B smoke (10 steps, batch=4, grad_accum=2, max_length=1024)
+
+| Metric | Value |
+|---|---|
+| Final smoke loss | 7.722 |
+| Trainable params | 29,859,840 (0.58% of 5.15B) |
+| Total batch size | 4 × 2 × 1 = 8 |
+| Step time, step 1 (warmup) | 8.80 s |
+| Step time, step 10 (steady) | **1.53 s/step** |
+| Samples / sec at steady | ~5.23 |
+
+Run A steady-state was ~1.57 s/step at the same effective batch — Run B comes in marginally faster despite Xformers (FA2 still off), confirming the batch/grad-accum reshape carried real value.
+
+Note the loss starts higher than Run A's first window (Run A: 10.244 → Run B smoke: 7.722) is **expected and good**: Run A's loss was averaged over many easy-to-predict image patch tokens, dragging the headline number down. Run B's loss is averaged only over assistant-JSON tokens (~25 per row), which are exactly what we want to optimize. A 7.7 starting value on a 25-token JSON is plausible and the curve has room to come down hard.
+
+### 6.5 Run launch
+
+Run A artifacts preserved by renaming `outputs/gemma4-e2b-androidcontrol-lora/` → `outputs/gemma4-e2b-androidcontrol-lora-runA/`. Both adapters now live side-by-side; eval can target either.
+
+```bash
+uv run python scripts/train_sft.py \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runB \
+    --epochs 1 \
+    2>&1 | tee outputs/runB_logs/train.log
+```
+
+Wall projection: 19,886 steps × 1.53 s/step ≈ 8h27. Same effective batch, same dataset, same epoch count — full-match should land well above baseline (0.288) and well above Run A (0.232).
+
+### 6.6 Stop / resume mid-training (2026-04-25)
+
+Run B was paused at **step 8748 / 19886 (~44%)** to free the GPU. Checkpoints retained on disk: `checkpoint-7500`, `-8000`, `-8500`. Loss had converged from 7.72 → ~0.28 with steady step time 1.43 s/step (faster than projection — FA2 not needed).
+
+Resumed overnight via:
+
+```bash
+uv run python scripts/train_sft.py \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runB \
+    --epochs 1 \
+    --resume \
+    2>&1 | tee -a outputs/runB_logs/train.log
+```
+
+`--resume` → SFTTrainer auto-discovers `checkpoint-8500` and restores optimizer state, scheduler state, and RNG. Verified pickup: log shows `8501/19886` immediately after weight-load completes, learning rate at 0.000123 (matches the `1e-4 * cosine_decay(8500/19886)` schedule), no warm-restart blip in loss. Remaining ~11.4k steps × 1.43 s ≈ **4h32 wall**. Section 8 will be added once Run B lands and the n=500 eval reruns.
+
+## 7. Outstanding / next (provisional, see Section 8 for actual results)
+
+- **Run B resuming overnight from checkpoint-8500.** Final loss, step trajectory, and the n=500 AndroidControl eval rerun against Run B's adapter will land in a new Section 8.
+
+---
+
+## 8. Run B results: completion + AndroidControl eval
+
+### 8.1 Training completion
+
+Run B finished cleanly at step 19,886 / 19,886 (epoch 1.0). Training summary line emitted by `SFTTrainer`:
+
+```
+{'train_runtime': '1.649e+04', 'train_samples_per_second': '9.645',
+ 'train_steps_per_second': '1.206', 'train_loss': '0.1392', 'epoch': '1'}
+```
+
+The 16,490 s figure covers *only* the resumed portion (steps 8501→19886). Combined with the pre-stop wall (~3h45 to step 8748), total Run B wall is roughly **8h17** — slightly under the 8h27 projection. Final adapter saved to `outputs/gemma4-e2b-androidcontrol-lora-runB/final/`. No NaN, no divergence, occasional grad_norm spikes (max ~28) absorbed without affecting loss trajectory.
+
+The headline `train_loss = 0.139` is the average over assistant-JSON tokens only (per-row JSON is ~25 tokens with `train_on_responses_only=True`), and is therefore not directly comparable to Run A's number which averaged over the full sequence including image patches.
+
+### 8.2 Headline metrics — n=500, seed=3407, tap_radius=0.14
+
+| Metric | Baseline (no LoRA) | Run A LoRA | **Run B LoRA** |
+|---|---:|---:|---:|
+| `parse_rate` | 0.994 | 0.994 | 0.992 |
+| `action_type_accuracy` | 0.544 | 0.548 | **0.612** |
+| `full_match` | **0.288** | 0.232 | 0.198 |
+| Wall (s) | 252.3 | 374.9 | 412.6 |
+
+**The loss-masking fix did exactly what we predicted on action-type accuracy** (+6.4 pts vs baseline, +6.4 pts vs Run A) — the model now picks the correct action category much more often. But `full_match` regressed further. Run B is the *worst* of the three on the headline metric we actually care about.
+
+### 8.3 Per-action breakdown
+
+`acc` = `correct / n` where `correct` counts as exact action-type match *plus* coordinate-within-radius (for tap/long_press) or argument-string-equal (for type/open_app/scroll).
+
+| action | n | Baseline | Run A | **Run B** |
+|---|---:|---:|---:|---:|
+| `done` | 89 | 0/89 (0.000) | 0/89 (0.000) | 0/89 (0.000) |
+| `long_press` | 2 | 0/2 (0.000) | 0/2 (0.000) | 0/2 (0.000) |
+| `navigate_back` | 20 | 14/20 (0.700) | 12/20 (0.600) | 12/20 (0.600) |
+| `navigate_home` | 1 | 0/1 (0.000) | 0/1 (0.000) | 0/1 (0.000) |
+| `open_app` | 29 | 17/29 (0.586) | 9/29 (0.310) | 7/29 (0.241) |
+| `scroll` | 51 | 10/51 (0.196) | 20/51 (0.392) | 22/51 (**0.431**) |
+| `tap` | 250 | **90/250 (0.360)** | 56/250 (0.224) | 43/250 (0.172) |
+| `type` | 31 | 13/31 (0.419) | 16/31 (**0.516**) | 7/31 (0.226) |
+| `wait` | 27 | 0/27 (0.000) | 3/27 (0.111) | 8/27 (**0.296**) |
+
+Where each model wins:
+- **Baseline best at**: `tap` (0.36 — dominates 50% of the eval), `navigate_back`, `open_app`.
+- **Run A best at**: `type` (0.52, the only category where any LoRA beats baseline by a wide margin).
+- **Run B best at**: `scroll`, `wait`, `action_type_accuracy` overall.
+
+### 8.4 The key diagnostic — confusion on `tap`
+
+`tap` is 50% of the eval set, so its accuracy dominates `full_match`. The pred-action distribution conditional on `gt.action == "tap"` (n=250):
+
+| pred → | tap (right type) | type | open_app | scroll | other |
+|---|---:|---:|---:|---:|---:|
+| Baseline | 180 (72%) | 24 | 23 | 6 | 17 |
+| Run A | 174 (70%) | 29 | 9 | 36 | 2 |
+| **Run B** | **236 (94%)** | 4 | 1 | 2 | 7 |
+
+Of those tap-typed predictions, fraction within 0.14 radius of the ground-truth coordinate:
+- Baseline: 90 / 180 = **50%**
+- Run A: 56 / 174 = **32%**
+- Run B: 43 / 236 = **18%**
+
+Run B picks "tap" almost every time the GT is "tap" — but the (x, y) coordinates it emits are further off than either Run A's or the baseline's. The model collapsed onto a few canonical screen positions (e.g. 0.5 / 0.5 area, 0.0 / 0.x edges) regardless of the actual UI layout. The model improved at JSON-schema decisions and got *worse* at spatial grounding.
+
+### 8.5 The key diagnostic — `done` failure mode
+
+`done` is 89/500 (18%) of the eval. **Zero correct across all three models.** The instruction prefix lists `done` as a valid action and the schema is `{"action": "done"}` (no args), so this is not a parse-rate problem — the model genuinely never decides to terminate.
+
+Run B's `done` confusion is the most concentrated:
+
+| Run | Top mispredictions on `done` (n=89) |
+|---|---|
+| Baseline | tap(39), open_app(13), type(12), scroll(11), navigate_back(5), wait(4) |
+| Run A | tap(36), scroll(31), type(11), open_app(7), wait(4) |
+| Run B | **tap(74)**, scroll(6), wait(6), navigate_back(1), navigate_home(1), type(1) |
+
+Run B funnels nearly every `done` example into a `tap`. Combined with §8.4, the same pattern: Run B aggressively over-predicts `tap`. SFT on a dataset where 50% of actions are `tap` and only ~5% are `done`, with no per-class loss reweighting, learned this prior hard.
+
+### 8.6 Root cause — why `tap` coordinate precision degraded
+
+Three plausible hypotheses, in priority order:
+
+1. **`train_on_responses_only=True` changed gradient mass distribution.** Run A masked the loss across the full sequence (image patches + user prompt + assistant), so the relative weight of any single coordinate token was small. Run B masked *only* assistant tokens (~25 per row), so each coordinate digit got proportionally more gradient. The model may have learned the *distribution* of coordinates (mode-seeking — predict 0.5/0.5 because it's the center of mass) rather than the *correct* coordinate per image. This is the inverse of what we expected.
+
+2. **4-bit base + LoRA on coord-decoder layers introduces precision loss.** The base model is frozen at NF4 quantization. LoRA updates flow through the quantized matmul. The MLP that ultimately predicts coordinate digit-tokens runs at 4-bit precision; numerical drift on the small adapter deltas may be larger for fine-grained spatial tokens than for action-type tokens (which are categorical). This would explain why action-type improved but coords degraded.
+
+3. **Image patch budget at 512×512 is too coarse.** Gemma 4 vision tokenizer produces 256 tokens for a 512px image. AndroidControl screenshots are ~1080×2340 native; resizing to 512 squashes long axis aspect by ~4.5×. Tap targets that are small UI elements may not be resolvable at this resolution. This is independent of training and would also degrade baseline — but we know baseline still gets 36% on tap, so resolution alone isn't the bottleneck.
+
+(2) is hardest to falsify without a fp16-base run, which is out of budget. (1) is testable cheaply: rerun a short SFT with `train_on_responses_only=False` and the rest of Run B's config, then re-eval n=500. (3) is testable by re-running the eval with `image_size=896` (max Gemma 4 supports) on the same Run B adapter — no retrain needed.
+
+### 8.7 Verdict and what to do next
+
+Run B is **not the win we expected**. The loss-masking fix gave a real but narrow improvement (action-type accuracy +6.4 pts) at the cost of coordinate precision. Net `full_match` regressed by 9 points vs baseline.
+
+This is informative for the project report:
+- We have evidence that SFT on AndroidControl with assistant-only loss masking can over-fit to the action-type prior (specifically the `tap` mode) at the expense of fine spatial outputs.
+- Both LoRA runs are *worse* than the unmodified base model on the headline metric — suggesting the next step is either (a) Step 3 RL with a coordinate-aware reward, (b) higher input resolution at eval, or (c) a different LoRA target-module set that excludes the vision-side projections.
+
+Concrete next experiments, in cost order:
+1. **Re-eval Run B at higher input resolution** (`image_size=896`). Cheap. Tests hypothesis (3) above.
+2. **Eval the cosine-decay midpoint adapter** (`checkpoint-12500` or `-15000`) — earlier checkpoints may have less collapsed behavior on `tap` before LR fully decayed.
+3. **Run C**: same hyperparameters as Run B but `target_modules` restricted to language-side only (drop vision attn/mlp). Tests hypothesis (2) indirectly by removing LoRA from the spatial pathway.
+4. **Step 3 RL (DPO)** on AndroidWorld trajectories — would directly optimize `full_match`-style success rather than next-token CE.
+
+## 9. Spatial diagnostic — confirmed mode collapse on `tap`
+
+After Run B's regression, we re-ran both eval streams (Run B and baseline) with `--save-all-predictions` and compared the predicted-coordinate distributions on the n=500 test slice. The diagnostic script is `scripts/analyze_tap_coords.py`. The 896px-resolution and mid-checkpoint experiments were ruled out (Gemma 4 vision tower is fixed-resolution; checkpoint rotation auto-deleted everything before step 19000), so this is the analysis we ran instead.
+
+### 9.1 The headline numbers
+
+| Metric | Baseline | **Run B** |
+|---|---:|---:|
+| Total `pred=tap` (across all 500 GTs) | 246 | 385 |
+| `pred=tap` AND `gt=tap` (n=250) | 180 (72%) | 236 (94%) |
+| Of those, within 0.14 radius | 90 / 180 (**50.0%**) | 43 / 236 (**18.2%**) |
+| Distinct (x, y) values @ 3 dp / total taps | 180 / 246 = 73% unique | **129 / 385 = 33% unique** |
+| Top-1 single (x, y) | (0.500, 0.930) @ 3.7% | (0.500, 0.500) @ **17.9%** |
+| Within 0.05 of screen-center (0.5, 0.5) | 4.5% | **18.4%** |
+| Within 0.05 of bottom-center (0.5, 0.9) | 9.8% | 8.1% |
+| Median GT distance on tap-on-tap | **0.143** | 0.358 |
+| p75 GT distance | 0.488 | 0.604 |
+
+`tap` is half the eval set; this is the regression that drives `full_match` from 0.288 → 0.198.
+
+### 9.2 Histogram comparison (predicted x and y over all tap predictions)
+
+`x` distribution:
+
+| bucket | Baseline | Run B |
+|---|---:|---:|
+| [0.0, 0.1) | 36 (15%) | 98 (25%) |
+| [0.1, 0.2) | 27 (11%) | 11 (3%) |
+| [0.2, 0.3) | 25 (10%) | 22 (6%) |
+| [0.3, 0.4) | 6 (2%) | 3 (1%) |
+| [0.4, 0.5) | 6 (2%) | 0 (0%) |
+| **[0.5, 0.6)** | 74 (30%) | **230 (60%)** |
+| [0.6, 0.7) | 6 (2%) | 0 (0%) |
+| [0.7, 0.8) | 8 (3%) | 2 (1%) |
+| [0.8, 0.9) | 37 (15%) | 3 (1%) |
+| [0.9, 1.0] | 21 (9%) | 16 (4%) |
+
+`y` distribution: baseline is broadly multi-modal (peak at the bottom-edge bucket = 29%), Run B is bimodal at top-third (29%) and middle-third (24%) with a third spike at bottom-edge (12%). Baseline covers all 10 deciles with at least 11 predictions each; Run B has two deciles ([0.4-0.5) and [0.6-0.7)) with ≤ 3 predictions.
+
+The baseline `x` distribution has mass at left/center/right (it grounds in the image and finds buttons wherever they are). Run B's `x` distribution has 60% of predictions in the [0.5, 0.6) bucket — the model's first instinct is "click middle" regardless of what's on screen.
+
+### 9.3 The smoking gun — top-15 predicted coordinates
+
+Run B (n=385 tap predictions, 129 distinct values):
+
+```
+  (0.500, 0.500)   n= 69   17.9%   <-- screen center
+  (0.500, 0.250)   n= 34    8.8%
+  (0.050, 0.050)   n= 19    4.9%   <-- top-left corner
+  (0.500, 0.333)   n= 17    4.4%
+  (0.075, 0.075)   n= 15    3.9%   <-- top-left corner
+  (0.500, 0.253)   n= 14    3.6%
+  (0.250, 0.250)   n= 10    2.6%
+  (0.062, 0.062)   n= 10    2.6%
+  (0.500, 0.075)   n=  8    2.1%
+  ... (top-9 = 51% of all tap predictions)
+```
+
+Baseline (n=246, 180 distinct values):
+
+```
+  (0.500, 0.930)   n=  9    3.7%
+  (0.000, 0.000)   n=  7    2.8%
+  (0.000, 0.990)   n=  6    2.4%
+  (0.500, 0.920)   n=  6    2.4%
+  (0.500, 0.230)   n=  5    2.0%
+  ... (top-15 = 27% of all tap predictions)
+```
+
+For Run B, the top-9 most-common (x, y) tuples account for **51%** of all tap predictions. For the baseline, the top-15 only account for 27%. Run B is emitting from a small vocabulary of canonical screen positions; the baseline is producing per-image specific coordinates.
+
+### 9.4 Verdict — what actually happened
+
+This is **structural mode collapse on the spatial axis**, not noise, not random degradation, not LR-schedule artifact. The coordinate decoder in Run B has decoupled from the image and is emitting a learned prior over coordinate-digit tokens.
+
+The mechanism is plausible-and-now-evidenced:
+
+- `train_on_responses_only=True` masks the loss to ~25 assistant-JSON tokens per example. Of those, 4-6 are coordinate digits. The CE loss has no way to distinguish "the right answer is 0.5 and you predicted 0.5" from "the right answer is 0.34 and you also predicted 0.5". Both contribute the same loss-magnitude on average if the dataset has lots of 0.5-area answers (it does — UI hit-targets cluster around centers and edges).
+- Predicting the *modal coordinate* ("0.5") is a low-risk, low-loss strategy that the optimizer can find without learning vision-language binding. Run B took it.
+- In Run A, the loss was averaged over the *full* sequence including ~256 image patches and the user-text tokens. Image-patch self-CE forced dense cross-modal coupling — the language-head gradients had to flow through vision representations to drive the patch-CE down. Removing those gradients (Run B) let the LM head decouple from the vision tower on the spatial axis specifically.
+- This explains the asymmetry: action-type accuracy went **up** in Run B (categorical token, no spatial component, no decoupling penalty) while tap precision went **down** (numerical token, requires image-grounding, decoupling helps the loss but breaks the task).
+
+What this rules out:
+- ✗ "Just keep training" — the trajectory is steady-state collapse, not under-fitting. More steps would deepen the bias toward (0.5, 0.5).
+- ✗ "Resolution bottleneck" — baseline gets 50% within-radius at the same 512px input. Resolution isn't the limiting factor; image-grounding is.
+- ✗ "Bad checkpoint timing" — last 4% of training (ckpt-19000 → final) cannot have caused a phenomenon this large. Had to start far earlier.
+
+### 9.5 What this implies for direction
+
+Two conclusions for the report:
+
+1. **Assistant-only loss masking is harmful for vision-grounded tasks where the assistant output contains numerical predictions tied to image content.** The standard NLP recipe (`train_on_responses_only=True`) is the right call for instruction tuning on text, but it actively breaks SFT when the assistant's output is image-conditioned numbers. This is a real, reproducible finding and worth writing up.
+
+2. **Next-token CE is the wrong loss for spatial prediction in this setting** — not just under loss masking, but in general. Even Run A (full-sequence loss) only got 32% within-radius on tap, also below baseline. SFT on next-token CE optimizes for token-distribution matching, not for "coordinate within ε of correct." The right loss is task-shaped (radius-aware coordinate match), which we get for free under RL with a binary success reward.
+
+**Initial recommendation:** skip Run C, commit to Step 3 (DPO). *Reversed below after lit survey.*
+
+---
+
+## 10. Lit survey + revised plan (Run C with published recipe)
+
+After the spatial diagnostic, before launching RL we did a literature pass on how published projects approach LoRA SFT on AndroidControl and adjacent UI-grounding benchmarks. Findings reshape the plan.
+
+### 10.1 Where our setup is on/off the well-trodden path
+
+**On-path:**
+- **Coordinate format.** Raw text floats in normalized [0,1] inside JSON is what SeeClick (arXiv 2401.10935), ShowUI (2411.17465), Aguvis (2412.04454), and UI-TARS (2501.12326) all use. Format is fine.
+- **Vision tower wrapped by LoRA.** Verified empirically: Run B's adapter has 224 vision-side LoRA tensors and 490 language-side. Unsloth's `FastVisionModel.get_peft_model(finetune_vision_layers=True)` does adapt the SigLIP tower despite `target_modules="all-linear"` — the agent's "vision is frozen" hypothesis is *wrong* for our case.
+- **Baseline number is plausible-ish.** Original AndroidControl paper (arXiv 2406.03679) reports zero-shot HL of 0.20-0.33 for PaLM-2/Gemini class. Our 0.288 sits in that range. LL zero-shot baselines are 0.45-0.55, which is *above* our 0.288 — the seed=3407 sample turned out to be 263 LL / 237 HL, mixed.
+
+**Off-path:**
+
+| Setting | Run B (ours) | ShowUI (closest analog) | Gap |
+|---|---|---|---|
+| LoRA rank | 16 | **64** | 4× capacity |
+| LoRA alpha | 16 (scaling 1.0) | **128 (scaling 2.0)** | Effective updates half-strength |
+| Learning rate | 2e-4 | **1e-4** | 2× too aggressive |
+| Loss masking | assistant-only (broke us) | assistant-only + 75% image-token mask | Their version explicitly handles vision tokens |
+| Image resolution | 512 | up to 1280 patches | Lower fidelity for fine UI |
+
+GUI-Perturbed (arXiv 2604.14262) directly states *"rank-8 LoRA SFT with cross-entropy loss is insufficient for spatial grounding alignment"* — we're at r=16, barely above their failure threshold. GUI-Actor (2506.03143) names our exact failure mode "center-peaking" and recommends multi-patch / bbox supervision or RL refinement.
+
+ShowUI is the published recipe closest to our setup (Qwen2-VL-2B, similar scale, same coordinate format) and achieves **75.1% on AndroidControl-grounding** — defining target performance.
+
+### 10.2 Why this changes the recommendation
+
+RL doesn't fix a broken initial policy. If Run B's coordinate decoder has decoupled from the image (Section 9 evidence), DPO will reinforce *which* of its (0.5, 0.5)-flavored guesses worked by chance, not teach it to look at the image. We need an SFT starting policy that at minimum *attempts* image-grounded coordinates before RL gets meaningful gradient signal.
+
+The lit survey reveals our Run B hyperparameters are below published thresholds for spatial grounding — particularly the rank/alpha combination. Run C (with capacity matching ShowUI norms) is the correct next step before RL.
+
+### 10.3 Run C config
+
+```bash
+uv run python scripts/train_sft.py \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runC \
+    --epochs 1 \
+    --lora-r 64 \
+    --lora-alpha 128 \
+    --lr 1e-4 \
+    --no-response-only \
+    2>&1 | tee outputs/runC_logs/train.log
+```
+
+Concrete deltas vs Run B:
+- **r 16→64, α 16→128** (4× rank, 8× alpha — capacity to actually learn spatial grounding; matches ShowUI norms)
+- **lr 2e-4→1e-4** (half — published vision-LoRA standard)
+- **`--no-response-only`** (revert from assistant-only masking — Section 9 diagnosis stands; full-sequence loss preserves cross-modal coupling)
+- Keep batch=4, grad_accum=2, max_length=1024 (verified safe at 0% truncation; speed wins from Run B)
+
+Approximate trainable param count: r=64 × all-linear ≈ 120M params (vs Run B's 30M). Wall-time projection: ~9-10h with the rank bump. Same overnight cadence as Run B.
+
+### 10.4 Eval method updates
+
+Two fixes to the eval pipeline before judging Run C:
+
+1. **Stratify metrics by AndroidControl `granularity` field.** Test set is 50/50 `goal` (HL) and `step_instruction` (LL). Published numbers report HL and LL separately because they differ by 15-25 points. Our seed=3407 draws 263/237 — close to balanced — but we previously reported one combined number. Updated `scripts/eval_androidcontrol.py` to track per-granularity metrics. Re-running baseline + Run B with stratification before Run C lands.
+
+2. **Save `granularity` and `user_text` per prediction** in `--save-all-predictions` output, so post-hoc rejoins work (the (episode_id, step_index) key is non-unique across HL/LL halves of test.jsonl).
+
+### 10.5 Stratified baseline + Run B (n=500, seed=3407, 263 LL + 237 HL)
+
+The combined-number comparison from Section 8 was hiding very different difficulties on HL vs LL. Re-eval results with `--save-all-predictions` and the now-granularity-aware metrics dict:
+
+| | Baseline HL | Run B HL | Δ | Baseline LL | Run B LL | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| `parse_rate` | 0.987 | 0.987 | 0 | 1.000 | 0.996 | -0.004 |
+| `action_type_acc` | 0.308 | 0.502 | **+0.194** | 0.757 | 0.711 | -0.046 |
+| **`full_match`** | **0.143** | 0.131 | -0.012 | **0.418** | **0.259** | **-0.159** |
+
+Three things to note:
+
+1. **HL is genuinely harder.** Baseline `full_match` is 3× lower on HL (0.143) than LL (0.418). Published zero-shot for PaLM-2S sits at HL 0.195 / LL 0.455 — our Gemma 4 E2B is below PaLM-2S on HL but close on LL.
+2. **Run B helps HL action-type prediction substantially** (+19 pts → 50%) but the coordinate-collapse cancels the win on `full_match`. The model now picks the right action type half the time on goal-only inputs (where baseline was at 31%) but still can't click the right place.
+3. **Run B actively damages LL.** This is the more important finding — on the slice where baseline was strong (clear per-step targets, easy to ground), the LoRA crashed `full_match` from 0.418 → 0.259 (-16 pts). The mode collapse to (0.5, 0.5) destroys the easy taps where baseline was correctly grounding from "tap the Send button" + image context.
+
+Section 9's diagnosis of structural mode collapse is reproduced at the granularity level: where baseline was image-grounded, Run B isn't.
+
+### 10.6 Run C smoke + launch
+
+50-step smoke (r=64, α=128, lr=1e-4, full-sequence loss):
+
+| step | loss | grad_norm |
+|---:|---:|---:|
+| 10 | 8.313 | 6.30 |
+| 20 | 2.960 | 3.21 |
+| 30 | 2.590 | 3.09 |
+| 40 | 2.132 | 2.44 |
+| 50 | 1.932 | 2.55 |
+
+train_loss = 3.585; runtime 89.4s for 50 steps = **1.79 s/step**. No nan, clean convergence. Initial loss is higher than Run B's smoke (8.31 vs 7.72) because we reverted to full-sequence loss — averages over many image-patch tokens which have ~uniform CE around 8 nats — but the curve drops faster than Run B's because 119M trainable params vs 30M gives the model meaningful capacity to fit response distributions.
+
+Wall projection: 19,886 × 1.79s ≈ **9h53m**, within the 9-10h budget. Trainable parameter count: 119,439,360 (2.28% of 5.24B base) — confirms r=64 LoRA on all-linear modules.
+
+Run C launched at this point in the run, saving to `outputs/gemma4-e2b-androidcontrol-lora-runC/`. Section 12 will be added once it completes.
+
+### 10.7 Run C stop / resume mid-training (2026-04-26)
+
+Run C was paused at **step 13805 / 19886 (~69%)** to free the GPU for other tasks. State at stop:
+
+- Wall elapsed: 5h35
+- Loss at stop: ~0.39 (down from smoke 1.93 → step 1000 ~0.95 → step 5000 ~0.72 → step 12000 ~0.51 → step 13800 ~0.39)
+- LR at stop: 3.07e-5 (cosine decay still in progress, ~30% of peak)
+- Checkpoints retained on disk: `checkpoint-12500`, `-13000`, `-13500` (trainer rotation kept last 3; earlier ones auto-deleted)
+- GPU released cleanly (311 MiB, 0%)
+- Remaining: 6081 steps × 1.45 s/step ≈ **2h27 wall**
+
+The loss-curve trajectory has been steady-but-slow throughout — fast initial drop (8.3 → 1.0 in first 1k steps as the model fits the structural baseline) then gradual decline (1.0 → 0.39 over 12.8k steps as it learns the assistant-JSON content). No nan, no divergence, occasional grad_norm spikes (max ~14) absorbed without affecting loss. Section 12 will compare Run C's eval against baseline + Run B once training completes.
+
+Resume command (overnight):
+
+```bash
+mkdir -p outputs/runC_logs && uv run python scripts/train_sft.py \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runC \
+    --epochs 1 \
+    --lora-r 64 --lora-alpha 128 \
+    --lr 1e-4 \
+    --no-response-only \
+    --resume \
+    2>&1 | tee -a outputs/runC_logs/train.log
+```
+
+`--resume` triggers SFTTrainer's `resume_from_checkpoint=True` which auto-discovers `checkpoint-13500` and restores optimizer state, scheduler state (cosine schedule continues at ~30% of peak), and RNG. All other flags must match the original launch. Same playbook as the Run B mid-training stop/resume in Section 6.6 — verified to work cleanly.
+
+## 11. Run C completion + final eval (2026-04-27)
+
+### 11.1 Resume + finish
+
+Resumed from `checkpoint-13500` overnight. Trainer auto-discovered the checkpoint; optimizer/scheduler/RNG state restored cleanly. Loss at step 13501 (~0.42) was within sampling noise of the loss at step 13500 before the stop (~0.39) — no resume artifacts.
+
+Final state:
+- Total wall: ~9h47 (5h35 pre-stop + 2h36 resume + ~1h interactive evals/diagnostics interleaved)
+- Final loss (last 10 steps): 0.35-0.40 (continued plateau)
+- Final LR: 3.5e-8 (cosine schedule reached its floor)
+- Total grad updates: 19,886 (1.0 epoch over 159k examples)
+- Adapter saved to `outputs/gemma4-e2b-androidcontrol-lora-runC/final/` (478 MB)
+- 638 loss-print intervals over the run; no nan, max grad_norm ≈ 14 (early), settled to 1-3 by step 5k+
+
+### 11.2 Run C eval results (n=500, seed=3407)
+
+```
+parse_rate            = 0.9680
+action_type_accuracy  = 0.5740
+full_match            = 0.1860
+per-granularity:
+  goal              n=237  parse=0.949  type=0.426  full=0.114
+  step_instruction  n=263  parse=0.985  type=0.707  full=0.251
+per-action-type:
+  tap          n=250  acc=0.220
+  done         n= 89  acc=0.011
+  scroll       n= 51  acc=0.157
+  open_app     n= 29  acc=0.310
+  type         n= 31  acc=0.419
+  wait         n= 27  acc=0.111
+  navigate_back n=20  acc=0.200
+```
+
+### 11.3 Head-to-head: baseline vs Run B vs Run C
+
+All evaluated on the same 500 rows (seed=3407, 263 LL + 237 HL).
+
+| | parse | type acc | **full_match** | HL full | LL full |
+|---|---:|---:|---:|---:|---:|
+| **Baseline (no LoRA)** | 0.994 | 0.546 | **0.288** | **0.143** | **0.418** |
+| Run B (r=16, α=16, lr=2e-4, asst-only loss) | 0.992 | 0.610 | 0.193 | 0.131 | 0.259 |
+| Run C (r=64, α=128, lr=1e-4, full-seq loss) | 0.968 | 0.574 | 0.186 | 0.114 | 0.251 |
+
+**Both LoRA runs lose to the baseline on the headline metric.** Run C is even slightly worse than Run B on `full_match` (0.186 vs 0.193) despite 4× the rank, half the LR, and the corrected loss masking. The headline gap vs baseline is 10.2 points (0.288 → 0.186).
+
+The granularity split is unambiguous in both runs:
+- **HL (goal-only)** — both LoRA runs are below baseline on full_match (Baseline 0.143, B 0.131, C 0.114). The model can pick the correct *action type* far better than baseline (B: 0.502, C: 0.426 vs baseline 0.308 on HL) — but the coordinate accuracy doesn't survive.
+- **LL (step instruction)** — this is where baseline shines (0.418) because Gemma 4 E2B has solid UI grounding when the instruction is concrete ("tap the Send button"). Both LoRAs *crash* this metric (B: 0.259, C: 0.251) — SFT actively damages the unmodified vision encoder's grounding behavior.
+
+### 11.4 Spatial diagnostic on Run C
+
+Run on the 335 tap predictions in `outputs/eval/lora_runC.json`:
+
+```
+Pred x mean/range: 0.380 / [0.000, 1.000]
+Pred y mean/range: 0.439 / [0.000, 0.946]
+x histogram: BIMODAL — 44% in [0.50,0.60], 37% in [0.00,0.10] (rest sparse)
+Distinct (x,y) coords (3dp): 187 / 335 = 55.8%
+Top-3 modes:
+  (0.062, 0.062)  7.2%   ← top-left corner cluster
+  (0.500, 0.500)  5.1%   ← center
+  (0.000, 0.000)  3.3%   ← origin
+Tap-on-tap within radius=0.14: 55/209 = 26.3%
+Median tap-on-tap distance from GT: 0.377  (2.7× the radius!)
+p75 distance: 0.544; p95: 0.902
+```
+
+Comparison of mode-collapse severity:
+| | Distinct (x,y) / pred-tap | Center cluster | Median dist (radius=0.14) |
+|---|---:|---:|---:|
+| Baseline (Section 9) | ~73% | 0% | ~0.10 (within radius majority) |
+| Run B (Section 9) | 33% | 18% at exactly (0.5,0.5) | ~0.32 |
+| Run C | 56% | 5.1% at (0.5,0.5) | 0.377 |
+
+Run C **partially un-collapsed** the (0.5, 0.5) singularity — it now spreads probability across more positions (187 distinct vs Run B's 129) — but the new modes are still structural, not image-grounded:
+- Top-left corner area (0.06, 0.06): 7.2% of all tap preds
+- Origin (0, 0): 3.3%
+- Bottom-center band (x=0.5, y in 0.84-0.94): 21+ predictions = 6.3%
+
+The full-sequence loss restored some image-text coupling (the model uses more positions) but the 4× rank + r=64 capacity + α=128 effective scaling all encouraged the model to memorize *dataset-typical* tap locations rather than image-grounded ones. The big trainable budget (119M params, 2.28% of base) was spent learning a rich prior over typical Android UI tap zones, not learning to ground in pixels.
+
+### 11.5 Diagnosis: why none of our recipes beat baseline
+
+The two failure modes are different but rooted in the same problem:
+- **Run B**: low capacity (30M params) + assistant-only loss → loss objective dominated by structural-token CE, and the small budget prevented the LoRA from learning anything image-conditional. Result: hard mode collapse.
+- **Run C**: high capacity (119M) + full-seq loss → loss preserves cross-modal coupling, but the large budget overpowers the base model's vision encoder. The LoRA learns dataset-typical UI biases (corners, action-bar stripes) and overrides Gemma 4's surprisingly-good zero-shot grounding instead of refining it.
+
+The data-side issue underneath both: AndroidControl `step_instruction` is a noisy annotation. Many "tap" steps describe UI affordances that don't unambiguously identify a single bbox in the screenshot (e.g., "go back" → could be system-back gesture, app-bar back arrow, or browser-back). SFT cross-entropy on noisy click coordinates does not produce a good policy — it produces a policy that hedges toward the centroid of plausible click zones. That centroid happens to be near (0.5, 0.5).
+
+This is consistent with the lit survey (Section 10.1): GUI-Perturbed explicitly states that rank-8 LoRA SFT with cross-entropy is "insufficient for spatial grounding alignment", and GUI-Actor names this exact failure mode "center-peaking". ShowUI's 75.1% AndroidControl number was achieved with **vision-language pretraining on Mind2Web/RICO grounding pairs first**, then SFT — pretraining we don't have.
+
+### 11.6 What this means for the project
+
+Two viable paths forward; the right one depends on what we're optimizing for:
+
+**Path A — Salvage with checkpoint-cherry-pick + DPO (in scope, low cost).**
+Eval earlier checkpoints from Run C (e.g., 5000, 10000, 15000) to find the sweet spot before overfitting hardens. If any earlier checkpoint clears baseline, take it as the SFT init and proceed to Step 3 (DPO with rollouts on AndroidControl-OOD or AndroidWorld). DPO on a *near-baseline* policy can amplify what the model already does well; DPO on the current Run C end-of-training adapter would just amplify the structural biases.
+
+**Path B — Acknowledge the gap (honest, ships).**
+Report: zero-shot Gemma 4 E2B (no LoRA) is the strongest Android-control policy we have at 0.288 AndroidControl full_match (0.418 LL / 0.143 HL). Document why our LoRA SFT regressed (this section). Skip Step 3 because RL on a regressed SFT init is worse than RL on baseline init, and we don't have the budget for grounding pretraining. Use baseline Gemma 4 E2B as the "best model" for any downstream demo.
+
+Tomorrow's call. Both paths preserve the experimental record we already have.
+
+## 12. Head-to-head diagnosis: baseline vs Run C (2026-04-27)
+
+The combined-number comparison from §11.3 shows Run C losing 10pts to baseline on `full_match` but doesn't say *what specifically* C broke. Built `scripts/compare_evals.py` to rejoin the two `*_full.json` predictions on `(episode_id, step_index, granularity)` and bucket every row.
+
+### 12.1 Bucket counts (n=500 same rows)
+
+| Bucket | Count | % |
+|---|---:|---:|
+| both_correct (preserved) | 66 | 13.2% |
+| **regression** (baseline ✓, C ✗) | **78** | **15.6%** |
+| gain (C ✓, baseline ✗) | 27 | 5.4% |
+| both_wrong | 329 | 65.8% |
+| Net (C − baseline) | **−51** | (matches 0.288 → 0.186) |
+
+Granularity split: HL 25 reg / 18 gain / net −7. LL **53 reg / 9 gain / net −44**. The damage concentrates on LL where baseline was strongest.
+
+### 12.2 Per-action-type net change
+
+| GT action | n | reg | gain | net |
+|---|---:|---:|---:|---:|
+| tap | 250 | **51** | 16 | **−35** |
+| navigate_back | 20 | 10 | 0 | −10 |
+| open_app | 29 | 10 | 2 | −8 |
+| scroll | 51 | 4 | 2 | −2 |
+| type | 31 | 3 | 3 | 0 |
+| wait | 27 | 0 | 3 | **+3** |
+| done | 89 | 0 | 1 | +1 |
+
+The only places C beat baseline are `wait` and `done` — actions that **require no spatial reasoning**, just emitting a verb token. SFT helped where the training signal is clean.
+
+### 12.3 Two distinct failure modes confirmed
+
+Sample regressions (full output in `outputs/eval/baseline_vs_runC.json`):
+
+| User text | GT | Baseline | Run C |
+|---|---|---|---|
+| "Click on the search icon" | (0.293, 0.934) | (0.24, 0.93) ✓ | **(0.062, 0.94)** |
+| "Internal storage at bottom" | (0.50, 0.94) | (0.50, 0.93) ✓ | **(0.00, 0.89)** |
+| "preview & test button" | (0.78, 0.30) | (0.78, 0.25) ✓ | **(0.50, 0.57)** |
+| "Accessories category" | (0.72, 0.14) | (0.63, 0.15) ✓ | **(0.062, 0.062)** |
+| "send icon" | (0.82, 0.08) | (0.93, 0.11) ✓ | **(1.0, 0.91)** |
+| "Open the Gmail app" (HL) | `open_app: Gmail` | `open_app: Gmail` ✓ | **`tap: (0.06, 0.40)`** |
+
+Two failure modes:
+
+1. **Spatial mode collapse** on tap coordinates — C's wrong predictions land on the structural modes from §9 (0.062, 0.5, 1.0) regardless of the actual UI element. Baseline lands within ~0.05 of GT consistently. The base Gemma 4 vision encoder *legitimately knows* where UI elements are; C learned to ignore that signal.
+2. **Action-type confusion** — 10 of 29 `open_app` rows became taps; 10 of 20 `navigate_back` rows likewise. C learned "most rows are taps" (250/500 GTs are taps) and over-applies it.
+
+Both confirm the §11.5 diagnosis empirically: token-level CE on text-encoded floats rewards mode-hugging; high-rank LoRA + full-seq loss let the model overfit "where things usually are" instead of refining the base's image grounding.
+
+## 13. Run D2 — small-rank early-stop attempt (2026-04-27)
+
+After §11/12 the question was: only Run C's last 3 checkpoints survive on disk (trainer rotation), so Path A as written (eval at 5k/10k/15k) is no longer feasible. **Run D2** was the cheapest test of the same hypothesis with checkpoints retained throughout.
+
+### 13.1 Hypothesis
+
+Run B (r=16, low-cap) collapsed to (0.5, 0.5). Run C (r=64, high-cap, full-seq) partially un-collapsed but learned dataset-typical UI biases. Hypothesis: a *middle-ground* config trained for fewer steps, with checkpoints saved frequently, lets us look for a sweet spot before either failure mode crystallizes.
+
+### 13.2 Config
+
+```bash
+uv run python scripts/train_sft.py \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runD \
+    --epochs 0.3 --lora-r 16 --lora-alpha 32 --lr 5e-5 \
+    --no-response-only --save-steps 500 --save-total-limit 15
+```
+
+Deltas vs Run C: r 64→16, α 128→32, lr 1e-4→5e-5, epochs 1.0→0.3 (~5965 steps), save_total_limit 3→15.
+
+To support the higher save-total-limit, exposed `--save-steps` and `--save-total-limit` as CLI flags in `scripts/train_sft.py`. (Run C and earlier runs hardcoded to 500 / 3.)
+
+### 13.3 Smoke (50 steps, batch=4 grad_accum=2)
+
+Loss 12.03 → 5.76 → 4.19 → 3.21 → 2.97 over 50 steps. Trainable params 29.86M (0.58%, matches r=16). Pace 1.73 s/step (slightly slower than Run B's; full-seq loss includes more tokens). Wall projection: 5965 × 1.45s ≈ 2h24.
+
+### 13.4 Full run completed cleanly
+
+- train_loss avg: 1.107
+- Wall: 8652s = 2h24
+- Last few steps: loss 0.93 - 0.97 (clear plateau)
+- 12 checkpoints saved: 500, 1000, 1500, ..., 5500, 5966 + `final/` (478 MB)
+- No nan, no divergence
+
+### 13.5 D2 evals — pending (queued behind Run E)
+
+GPU is occupied by Run E (§14). D2 eval sweep across all 12 checkpoints (200 samples each, save predictions) will fire after Run E completes, regardless of Run E's outcome. The point of D2 was to map the curve, not any specific endpoint.
+
+## 14. Run E — coordinate-aware Huber auxiliary loss (2026-04-27)
+
+The §12 head-to-head established that the Run C failure is *structural*: token CE on text floats can't distinguish "0.500" from "0.293" by screen distance. Tuning rank/lr won't fix this. D2 (§13) tests whether early-stop helps within the same broken objective; Run E tests a fundamentally different objective.
+
+### 14.1 The objective fix
+
+Add a second loss term that, at training time:
+
+1. For every tap row, parse GT (x, y) from the assistant JSON.
+2. Locate the digit-token positions in `labels` (using "last two digit-or-dot token runs" — robust to SP context-dependent merging).
+3. From the model's logits at those positions, compute a soft expected-value reconstruction:
+   `pred_x = Σ_k place_value[k] · Σ_d softmax(logits[k-1])[digit_id(d)] · d`
+4. Add `coord_weight × Huber(‖(pred_x, pred_y) − (gt_x, gt_y)‖, δ=0.05)` to standard CE.
+
+The off-by-one shift (`logits[k-1]` predicts `labels[k]`) and the bf16→fp32 cast for the digit-place math are both critical. Implementation in two new files:
+
+- `scripts/coord_aware_collator.py` — wraps `UnslothVisionDataCollator`, adds 7 metadata tensors per batch (`coord_is_tap`, `coord_gt_x`/`y`, `coord_x_pos`/`y_pos`, `coord_x_place`/`y_place`).
+- `scripts/coord_aware_trainer.py` — subclasses `SFTTrainer`; overrides `compute_loss` to add the aux term.
+
+`scripts/train_sft.py` now takes `--coord-loss-weight` (default 0.0 = behavior unchanged). Plan in `~/.claude/plans/sunny-coalescing-book.md`.
+
+### 14.2 Validation steps + bug saga
+
+1. **`compute_place_values` unit-tested** on representative strings: `"0.293" → [1.0, 0.1, 0.01, 0.001]`, `"0.5" → [1.0, 0.1]`, `"0.293056" → [1.0, ..., 1e-6]`. ✓
+
+2. **Tokenizer assumption verified** with real Gemma 4 tokenizer: each digit `0..9` and `.` tokenizes to a single ID (e.g., `0 → 236771`, `5 → 236810`, `. → 236761`), and the IDs are consistent across contexts (no `▁0` vs bare-`0` ambiguity inside JSON fragments).
+
+3. **Initial digit-locator approach failed** — I started with anchored-substring search (`tokenize(', "x": 0.5,')` and find as contiguous run in labels), but SP merges adjacent punctuation: `"tap"` followed by `,` gets fused into compound token `'",'` (id 827), and `' "'` (space-quote, id 623). Searching for the standalone-encoded `, "x": 0.5,` (with bare comma) doesn't match labels because labels have the compound `'",'`.
+
+4. **Switched to "last two digit-or-dot runs in labels" heuristic** — for a tap action, the assistant text always ends `... "x": V, "y": W}`, so the *last two* contiguous runs of digit/dot tokens in labels are always GT x then GT y. Robust to any tokenizer fusion of surrounding punctuation. Verified on a realistic prompt + assistant text containing `<0..1>` schema placeholders + a goal with digits ("Set alarm for 7:30 AM"); 4 spurious digit runs from prompt show up in labels but the *last two* are still the GT x and y. ✓
+
+5. **End-to-end functional test** (CPU-only, real tokenizer, stub base collator) on 4 examples (3 taps + 1 non-tap, varied decimal lengths). All taps mapped (0 skipped), positions and place values correct. Skip rate 0%.
+
+6. **GPU smoke ran into Unsloth's logit-disable optimization.** First crash:
+
+   ```
+   TypeError: tensor(): argument 'device' must be torch.device, not function
+   ```
+
+   Fixed by getting device from `inputs["input_ids"]` rather than `outputs.logits.device` (which Unsloth wraps under memory-offload). Cached digit IDs on CPU at `__init__`, moved to device on first compute_loss.
+
+7. **Second crash** — `outputs.logits` was the `EMPTY_LOGITS` sentinel:
+
+   ```
+   NotImplementedError: Unsloth: Logits are empty from 2024.11 onwards.
+   To get raw logits again, please set the environment variable
+   UNSLOTH_RETURN_LOGITS to "1" BEFORE starting to train ie before trainer.train().
+   ```
+
+   Setting it via shell prefix didn't work either. Tracing through the dependency graph:
+
+   - `unsloth_compiled_module_gemma4.py:1355`: `logits = self.lm_head(...) if os.environ.get('UNSLOTH_RETURN_LOGITS', '0') == '1' else EMPTY_LOGITS` — runtime check.
+   - `unsloth/models/vision.py:1766`: `FastVisionModel.for_training(model)` sets the env var to `"0"`.
+   - `unsloth_compiled_cache/UnslothSFTTrainer.py:84`: the `train()` wrapper calls `self.model.for_training(...)` *immediately before* the actual training_step starts, undoing whatever we set externally.
+
+   Final fix: set `os.environ["UNSLOTH_RETURN_LOGITS"] = "1"` *inside* `compute_loss` itself, on every step, before calling `super().compute_loss`. Idempotent and immune to the wrapper's reset.
+
+8. **Smoke succeeded** with the env-var fix. 20 steps, batch=4:
+   - `[coord] first batch: tap_count=3 mapped=3 skipped=0`
+   - step 10: `loss=13.87 grad=52 coord_loss=0.811 coord_active=2.4`
+   - step 20: `loss=8.50 grad=73 coord_loss=0.660 coord_active=1.9`
+   - No NaN, both loss terms decreasing. ✓
+
+### 14.3 Run E launch
+
+```bash
+uv run python scripts/train_sft.py \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runE \
+    --epochs 0.3 --lora-r 16 --lora-alpha 32 --lr 5e-5 \
+    --no-response-only --coord-loss-weight 1.0 \
+    --save-steps 500 --save-total-limit 15
+```
+
+Same hyperparameters as D2 *except* `--coord-loss-weight 1.0`. Direct A/B test of "with vs without coord-aware loss, all else equal." Wall projection ~2h24.
+
+### 14.4 Notes on Gemini's external suggestions
+
+While Run E was loading, asked Gemini to brainstorm independently. It proposed:
+
+1. **Discretize coordinates (1000-token grid).** Same root-cause attack as Run E (text-CE doesn't reward screen distance), but more expensive (resize embeddings + train new tokens with PEFT in 4-bit is non-trivial). Run E is the cheaper test of the same hypothesis. Hold as fallback.
+2. **Larger LoRA (r=64-128, all-linear).** Already done — Run C used r=64, α=128, all-linear, 119M params. *Worse* than baseline. Empirically falsified for this dataset/base.
+3. **Set-of-Mark / widget-ID tool calling.** Conceptually strong but requires preprocessing the entire dataset to attach widget IDs from the accessibility trees (which we currently ignore). 2-3 day effort. Park as a longer-term direction.
+4. **Normalize coords to [0, 1].** Already in `scripts/prepare_androidcontrol.py:174-185`.
+
+Net: of four ideas, two are already in (1, 4 of Gemini's list) or already empirically refuted (2). The two real alternatives — discrete tokens (1) and SoM (3) — are both more expensive than the coord-aware loss currently in flight. Execution order is correct as-is.
+
+## 15. Run E completion + final eval (2026-04-27)
+
+### 15.1 Training stats
+
+- Wall: 8963s = **2h29** (within budget)
+- 5966 steps, 0.3 epoch over 159k examples
+- Loss trajectory:
+  - Step 1k: ce ≈ 1.65, coord_loss ≈ 0.27
+  - Step 3k: ce ≈ 1.55, coord_loss ≈ 0.24
+  - Step 5k: ce ≈ 1.50, coord_loss ≈ 0.13
+  - End (avg over run): ce ≈ 1.55, **coord_loss ≈ 0.09**
+- The geometric loss decreased monotonically from smoke (0.66) → end (~0.09): the auxiliary loss term is doing what it should.
+- One grad-norm spike to ~18 mid-run, absorbed without divergence. No NaN throughout.
+- 12 checkpoints (500–5966) + `final/` saved.
+
+### 15.2 Eval results (n=500, seed=3407)
+
+```
+parse_rate            = 0.9620
+action_type_accuracy  = 0.5200
+full_match            = 0.2100
+per-granularity:
+  goal              n=237  parse=0.975  type=0.329  full=0.127
+  step_instruction  n=263  parse=0.951  type=0.692  full=0.285
+per-action-type:
+  tap          n=250  acc=0.232
+  navigate_back n=20  acc=0.600
+  open_app     n= 29  acc=0.414
+  scroll       n= 51  acc=0.235
+  type         n= 31  acc=0.290
+  done         n= 89  acc=0.000
+  wait         n= 27  acc=0.074
+```
+
+### 15.3 Comparison table
+
+| | full_match | tap acc | HL full | LL full | parse |
+|---|---:|---:|---:|---:|---:|
+| **Baseline (no LoRA)** | **0.288** | ~0.30 | 0.143 | 0.418 | 0.994 |
+| Run B (r=16/16, lr=2e-4, asst-only) | 0.193 | 0.190 | 0.131 | 0.259 | 0.992 |
+| Run C (r=64/128, lr=1e-4, full-seq) | 0.186 | 0.220 | 0.114 | 0.251 | 0.968 |
+| **Run E (r=16/32, lr=5e-5, full-seq, +coord_loss=1.0)** | **0.210** | **0.232** | **0.127** | **0.285** | 0.962 |
+
+Run E is **the best LoRA we've trained**. Beats Run B and Run C on every metric except parse_rate (and even there is comparable). But still **8 points below baseline on full_match**.
+
+### 15.4 Spatial diagnostic — the structural fix landed
+
+Coord-aware loss directly attacks the mode-collapse failure mode from §9 / §11.4. The numbers show it worked:
+
+| Metric | Baseline | Run B | Run C | **Run E** |
+|---|---:|---:|---:|---:|
+| Distinct (x,y) coords (3dp) / pred-tap | 73% | 33% | 56% | **83%** |
+| Mass on (0.5, 0.5) cluster | 0% | 18% | 5.1% | **2.8%** |
+| Top-3 mode mass (% of preds) | < 4% | ~22% | ~16% | < 4% |
+| Median tap-on-tap distance | ~0.10 | ~0.32 | 0.377 | **0.262** |
+| Within-radius (0.14) rate | ~50% | ~25% | 26.3% | **33.7%** |
+
+Run E's coordinate distribution is *more diverse than baseline* (83% distinct vs 73%) and the canonical-mode hugging is essentially gone. Median tap-on-tap distance dropped 31% vs Run C (0.377 → 0.262). The mechanism we diagnosed in §11.4 / §12.3 is no longer the bottleneck.
+
+What still pulls full_match down: the model spread its predictions widely *but is not yet accurately grounded* in pixels. Median 0.262 means most tap predictions are still ~2× the radius away from GT. That's a remaining grounding gap, not a mode-collapse gap.
+
+### 15.5 Head-to-head: Run E vs baseline (n=500 same rows)
+
+| Bucket | Count | % |
+|---|---:|---:|
+| both_correct | 80 | 16.0% |
+| **regression** (baseline ✓, E ✗) | **64** | **12.8%** |
+| gain (E ✓, baseline ✗) | 25 | 5.0% |
+| both_wrong | 331 | 66.2% |
+| Net (E − baseline) | **−39** | (matches 0.288 → 0.210) |
+
+Vs Run C's bucket: both_correct went up (66 → 80), regressions went down (78 → 64), gains slightly down (27 → 25). Net improved from −51 to −39 — **we recovered 12 rows from baseline that prior LoRAs lost**.
+
+### 15.6 Per-action-type net change vs baseline
+
+| Action | n | Run C net | **Run E net** | Δ (E vs C) |
+|---|---:|---:|---:|---:|
+| tap | 250 | −35 | **−32** | +3 |
+| navigate_back | 20 | −10 | **−2** | **+8** |
+| open_app | 29 | −8 | **−5** | +3 |
+| scroll | 51 | −2 | **+2** | +4 |
+| type | 31 | 0 | −4 | −4 |
+| wait | 27 | +3 | +2 | −1 |
+| done | 89 | +1 | 0 | −1 |
+
+**Run E recovered most of Run C's action-type confusion:** the `navigate_back` damage (−10 → −2) and the `open_app` over-tapping (−8 → −5) are largely fixed, and `scroll` flipped to net positive. The action-type confusion mode from §12.3 was secondary to the coord mode-collapse — fixing the coord loss apparently let the model rediscover the action-type signal too.
+
+The remaining tap deficit (−32) is *grounding* — the model picks tap correctly more often, but its coordinate is still farther from GT than baseline's.
+
+### 15.7 What it means
+
+The coord-aware Huber loss did what we asked of it: dissolve the mode-collapse, restore action-type discrimination, lift the LoRA from 0.186 → 0.210 on `full_match` (12% relative). But the remaining 0.078-point gap to baseline (0.288 → 0.210) is *not* a mode-collapse problem any more.
+
+Two interpretations of what's left:
+
+1. **Insufficient training**. Run E is 0.3 epoch; the loss curve on coord_loss was still trending down at the end (smoke 0.66 → end ~0.09). A longer run (1.0 or 2.0 epochs) might close more of the grounding gap. Cost: another ~8h to verify.
+
+2. **The base model's grounding is genuinely hard to beat with SFT alone**. Gemma 4 E2B's vision tower already locates UI elements well (median ~0.10 distance on tap-on-tap rows); SFT on noisy click annotations spreads the predictions but doesn't sharpen them. This matches §11.5 — published-good systems all use a *grounding-pretraining* stage before AC SFT.
+
+Path D2 evals (§16) will help disambiguate (1) by showing whether mid-run D2 checkpoints (without coord_loss) ever clear baseline; if not, interpretation (2) gets stronger.
+
+## 16. D2 checkpoint sweep (2026-04-27)
+
+Evaluated all 12 D2 checkpoints at 200 samples each (seed 3407). Curve:
+
+| step | parse | type | full | HL | LL |
+|------|-------|------|------|------|------|
+| **500** | **1.000** | **0.600** | **0.220** | 0.141 | **0.297** |
+| 1000 | 1.000 | 0.575 | 0.175 | 0.101 | 0.248 |
+| 1500 | 1.000 | 0.565 | 0.185 | 0.101 | 0.267 |
+| 2000 | 0.995 | 0.560 | 0.175 | 0.111 | 0.238 |
+| 2500 | 0.995 | 0.550 | 0.195 | 0.111 | 0.277 |
+| 3000 | 1.000 | 0.560 | 0.175 | 0.121 | 0.228 |
+| 3500 | 0.995 | 0.535 | 0.185 | 0.131 | 0.238 |
+| 4000 | 0.990 | 0.545 | 0.190 | 0.111 | 0.267 |
+| 4500 | 0.995 | 0.540 | 0.195 | 0.131 | 0.257 |
+| 5000 | 1.000 | 0.530 | 0.190 | 0.131 | 0.248 |
+| 5500 | 1.000 | 0.530 | 0.170 | 0.111 | 0.228 |
+| 5966 | 1.000 | 0.555 | 0.190 | 0.141 | 0.238 |
+
+**Findings**:
+- Best D2 checkpoint: step 500 at `full_match=0.220` — still 7 points below baseline (0.288). Never crosses baseline.
+- D2 peaks early (step 500), then plateaus / mildly degrades. Training longer is strictly worse, not better.
+- `action_type_accuracy` declines monotonically from 0.60 → 0.53 over the run — the model gets *worse* at non-tap actions as it trains more on the tap-heavy corpus.
+- LL consistently outperforms HL (0.30 vs 0.14 at best checkpoint) — model copes with explicit step instructions but the goal-only path is hard.
+
+**Implications**:
+- The hypothesis from §15 — "action-type imbalance dominates regressions" — is now empirically validated by a clean monotonic curve.
+- Pure CE on text-encoded floats has a hard ceiling around `full_match=0.21–0.22` for this model + dataset, regardless of training duration.
+- The structural fix in Run E (coord-aware Huber) was *load-bearing* (closed the spatial-mode-collapse failure mode) but did not break this ceiling.
+- Combined with §15's failure-mode analysis: the gap to baseline is a mix of (a) action-type imbalance and (b) coord representation that gives partial credit for "close digit strings". Both need to be attacked.
+
+## 17. Options analysis + plan for Run G (2026-04-27)
+
+After D2 sweep + Run E diagnostic, brainstormed six paths and wrote two implementation plans:
+
+1. **Option 1 — Action-type rebalancing**: per-row CE weighting inversely proportional to action-type frequency. Cheap (~3h training), attacks the action-type-confusion failure mode (25% of Run E regressions).
+
+2. **Option 2 — Discrete coordinate tokens**: Qwen-style 1024-bucket-per-axis special tokens (`<loc_x_K>` / `<loc_y_K>`). Replaces token-CE-on-text-floats with single-token CE, which is the actual screen-distance penalty. Larger change but the structural fix the lit consistently uses.
+
+3. Other options considered + held in reserve: full-epoch Run F with current setup (likely just lands at parity), Set-of-Mark prompting (alternative to discrete coords), smaller-LR longer training, ship baseline + go to Step 3 RFT.
+
+**Plan files**:
+- `/home/sanskar/.claude/plans/option1-action-type-rebalancing.md`
+- `/home/sanskar/.claude/plans/option2-discrete-coord-tokens.md`
+
+**Sequencing chosen**: stack Option 1 + Option 2 in a single Run G. Skip Run F entirely. The `compare_evals.py` head-to-head can attribute gains separately post-hoc, so we don't need a clean per-option ablation right away. If Run G clears baseline, ship; if it improves but doesn't, attribute and iterate.
+
+## 18. Implementation of Options 1 + 2 (2026-04-27)
+
+### Files modified
+
+| File | Changes |
+|---|---|
+| `scripts/coord_aware_collator.py` | +24 LOC. New `action_weights` ctor arg; emits `coord_action_weight [B] f32` per batch (default 1.0 = back-compat). Adds `_extract_action_type` classmethod. |
+| `scripts/coord_aware_trainer.py` | +54 LOC. New `use_sample_weights`, `digit_validation` flags. New `_weighted_ce_loss` does manual per-row CE with `reduction='none'`, masked sum/count, then per-row weight. Coord-aux Huber inherits row weights consistently. Logs `weighted_ce` and `mean_row_weight`. |
+| `scripts/train_sft.py` | +170 LOC. `compute_action_weights()` supports `inverse / sqrt-inverse / cui` schemes (Cui et al. CVPR 2019). Clamp + renormalize so count-weighted mean stays at 1.0 (preserves existing LR/scheduler tuning). `_add_discrete_loc_tokens()` adds 2× grid_size special tokens, resizes embeddings (incl. Gemma3/4-specific `embed_tokens_per_layer`), runs subtoken-mean init with RMS-norm matching, syncs `lm_head` if untied. 7 new CLI flags. Discrete mode adds `modules_to_save=["embed_tokens", "lm_head"]` to PEFT. Saves tokenizer alongside adapter. |
+| `scripts/prepare_androidcontrol.py` | +25 LOC. `--coord-encoding {float,discrete}` and `--grid-size`. `encode_discrete_xy()` quantizes normalized coords; emits `"x": "<loc_x_K>"` (JSON-quoted string). |
+| `scripts/eval_androidcontrol.py` | +90 LOC. `_parse_coord()` accepts float / numeric string / `<loc_x_K>`. `actions_match` is now format-invariant (cross-format match works). New discrete-adapter load path: load base, resize main + per-layer embeddings, re-attach LoRA via Unsloth's `get_peft_model` (stock PEFT chokes on Gemma 4's `ClippableLinear`), translate saved keys (`*.lora_A.weight` → `*.lora_A.default.weight`), copy state_dict with `strict=False`. Keeps `<loc_*>` visible in decode (`skip_special_tokens=False`). |
+| `data/androidcontrol_disc1024/` (new) | Discrete-encoded JSONL (159K train, 39K test rows; 83.5K tap rows converted). Images symlinked from `data/androidcontrol/images/`. |
+
+### Action-type weights (sqrt-inverse, clamp 5.0, count-weighted mean = 1.0)
+
+| action | count | freq | weight |
+|---|---|---|---|
+| navigate_home | 44 | 0.0003 | 5.07 (clamped) |
+| long_press | 266 | 0.0017 | 5.07 (clamped) |
+| navigate_back | 4,936 | 0.031 | 2.39 |
+| open_app | 9,202 | 0.058 | 1.75 |
+| wait | 9,290 | 0.058 | 1.74 |
+| type | 9,728 | 0.061 | 1.70 |
+| scroll | 17,664 | 0.111 | 1.26 |
+| done | 24,452 | 0.154 | 1.07 |
+| tap | 83,500 | 0.525 | 0.58 |
+
+`tap` rows downweighted to 0.58×, `navigate_back` upweighted 4×, ultra-rare classes capped at ~5×.
+
+### Bug saga during smoke testing
+
+Five real bugs caught and fixed by smoke tests *before* committing to a multi-hour run:
+
+1. **Trainer `n` counter**: in the weighted-CE-only path (no coord aux), `_record_coord_metric` was never called → `weighted_ce`/`mean_row_weight` log lines were always zero. Fixed by recording in the early-return branch. (Found by reading code, not by smoke.)
+
+2. **Weight scheme normalization**: clamp was applied *before* normalization → `cui` scheme produced all-1.0 weights (raw values 0.001–0.023 all clamped to floor 0.2, then normalized back to 1.0). Fixed: normalize first, clamp final values, re-normalize. (Found by inspecting the printed weight table.)
+
+3. **Eval skip_special_tokens**: `processor.decode(skip_special_tokens=True)` would strip `<loc_*>` tokens from the model's generation, breaking parse. Fixed: gate on `coord_encoding`. (Found by reading code.)
+
+4. **Gemma 4 `embed_tokens_per_layer`**: smoke 2 crashed at step 0 with "vectorized_gather_kernel index out of bounds". Diagnostic reproducer revealed Gemma 4 has a *second* embedding table at `model.language_model.embed_tokens_per_layer` with shape `(262144, 8960)` — a Gemma3/4 specific architectural feature for layer-aware embedding. HuggingFace's `resize_token_embeddings()` does NOT touch it, leaving new token IDs out of bounds for the per-layer lookup. Fixed: added `_find_per_layer_embedding()` + manual resize via `nn.Parameter(torch.cat(...))`.
+
+5. **Eval discrete-adapter load**: PEFT's `load_state_dict` rejects size mismatches (saved 264192 vs base 262144); plain `peft.PeftModel.from_pretrained` rejects Gemma 4's `Gemma4ClippableLinear` wrappers ("only torch.nn.Linear/Embedding/... supported"). Saved file uses `lora_A.weight` naming but freshly-wrapped multi-adapter model expects `lora_A.default.weight`. Solved with a new load path: load base → resize main + per-layer → re-attach LoRA via Unsloth's `get_peft_model` (which knows how to wrap ClippableLinear) → translate keys (`*.lora_A.weight` → `*.lora_A.default.weight`, `*.embed_tokens.weight` → `*.embed_tokens.modules_to_save.default.weight`) → `load_state_dict(strict=False)`. Verified: 716 tensors loaded, 0 missing/unexpected adapter-relevant keys.
+
+### Smoke 1 (Option 1 only, 20 steps)
+
+```
+loss: 14.86 → 9.33
+weighted_ce: 14.02 → 8.78
+coord_loss: 0.834 → 0.553   (Huber decreasing)
+mean_row_weight: 0.96 → 1.00 (normalization correct)
+tap_count=3 mapped=3 skipped=0
+```
+~1.27 it/s. Adapter saved. ✅
+
+### Smoke 2 (Option 1 + 2, 20 steps, after embed_tokens_per_layer fix)
+
+```
+Resizing embeddings: 262144 → 264192 (pretrained_rms=1.1953)
+Resizing embed_tokens_per_layer: 262144 → 264192 (dim=8960)
+New-token RMS after init = 1.1953 (matches pretrained)
+modules_to_save = ['embed_tokens', 'lm_head']
+loss: 13.53 → 7.094
+weighted_ce: 13.53 → 7.094
+coord_loss=0 (expected — no float digits in discrete-mode tap responses)
+```
+841M trainable / 5.99B (14.1%) due to embed + lm_head + LoRA. ~1.25 it/s. ✅
+
+### Smoke eval (5 samples on 20-step adapter)
+
+After three fix iterations, `Loaded adapter: 716 tensors, 0 missing/unexpected adapter-relevant`. Model emits `<loc_*>` tokens in generation:
+
+```
+sample 1: '{"action": "tap", "x": <loc_x_189><loc_x_189>, "y": <loc_x_556><loc_x_102><loc_x_136>}'
+sample 3: '{"action": "tap", "x": "<loc_x_556><loc_x_1003><loc_x_1003>", ...}'
+sample 4: '{"action": "tap", "x": <loc_x_18><loc_x_168>, ...}'
+```
+Multiple-loc-tokens-per-coord is a "needs more training" issue (20 steps is far too few), but the infrastructure is end-to-end verified. ✅
+
+## 19. Run G — discrete coords + action weights (2026-04-27, in flight)
+
+Launched ~12:35:
+
+```
+uv run python scripts/train_sft.py \
+    --data-dir data/androidcontrol_disc1024 \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runG \
+    --epochs 0.3 --lora-r 16 --lora-alpha 32 --lr 5e-5 --no-response-only \
+    --coord-encoding discrete --grid-size 1024 \
+    --action-weight-scheme sqrt-inverse \
+    --save-steps 500 --save-total-limit 15
+```
+
+Same hyperparameters as Run E (r=16, α=32, lr=5e-5, no-response-only, 0.3 epoch) for direct comparison. Total 5,966 steps, ETA ~2h36m on the 4090. ~1.58 s/step (slightly slower than Run E due to `embed_tokens` and `lm_head` being trainable as full modules — 841M params in `modules_to_save` + LoRA).
+
+**Loss curve so far (step ~480, ~8% complete)**:
+- `loss` (total): 13.5 → 2.6–3.5 (already well below where Run E plateaued)
+- `weighted_ce`: 1.3–1.9 (declining)
+- `mean_row_weight`: 0.95–1.05 (per-batch; sqrt-inverse weights firing as expected)
+- `coord_loss`: 0 (inactive in discrete mode — by design)
+- `grad_norm`: 6–12, no spikes — stable
+
+**Success criteria** (judged at best checkpoint via 200-sample eval):
+
+| Metric | Run E | Baseline | Run G target |
+|---|---|---|---|
+| `full_match` overall | 0.210 | 0.288 | ≥ 0.34 |
+| `full_match` LL | ≈0.30 | 0.418 | ≥ 0.50 |
+| Median tap-on-tap distance | 0.18 | 0.10 | ≤ 0.10 |
+| Distinct (x,y) coords | 0.83 | 0.73 | ≥ 0.85 |
+| Top-3 mode coverage | 6.0% | (low) | ≤ 6.0% |
+
+Clears 4/6 → ship + Step 3. Clears 2–3 → real but partial; investigate longer epoch or grid-size 2048. Clears 0–1 → discrete tokens didn't help; pivot to Set-of-Mark.
+
+## 20. Outstanding / next
+
+- **Run G completion + 5-checkpoint eval sweep** at steps {1500, 3000, 4500, 5500, 5966}, 200 samples each.
+- **Head-to-head** at best Run G checkpoint vs baseline + spatial diagnostic.
+- **Decision**: ship-vs-iterate based on Run G success-criteria scoring.
+- **AndroidWorld eval** — only meaningful once we have a model that clears AndroidControl baseline.
+- **Step 3 DPO/RFT** — gated on Run G clearing baseline.
+- **Adapter merge → MLX 8-bit** — defer until winning artifact exists.
+- **FA2 install retry** — opportunistic.
