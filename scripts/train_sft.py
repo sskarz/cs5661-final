@@ -195,6 +195,48 @@ def _add_discrete_loc_tokens(model, tokenizer, grid_size: int, init_strategy: st
             print(f"  WARN: could not sync lm_head: {e}")
 
 
+def _audit_lora_coverage(model, require_projector: bool = True) -> None:
+    """Print region-wise trainable-param breakdown after get_peft_model().
+
+    For 5 prior runs we silently shipped with embed_vision.embedding_projection
+    completely frozen — Unsloth's all-linear heuristic skips top-level Linears.
+    This audit walks every trainable parameter, buckets by region, and aborts
+    if the projector bucket is empty when we asked for it to be trained.
+    """
+    buckets: dict[str, int] = {}
+    projector_params = 0
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if "vision_tower" in name:
+            r = "vision_tower"
+        elif "embed_vision" in name:
+            r = "embed_vision (projector)"
+            projector_params += p.numel()
+        elif "embed_audio" in name:
+            r = "embed_audio"
+        elif "audio_tower" in name:
+            r = "audio_tower"
+        elif "language_model" in name or "model.layers" in name:
+            r = "language_model"
+        elif "embed_tokens" in name:
+            r = "embed_tokens (modules_to_save)"
+        elif "lm_head" in name:
+            r = "lm_head (modules_to_save)"
+        else:
+            r = "other"
+        buckets[r] = buckets.get(r, 0) + p.numel()
+    print("[lora-audit] trainable param breakdown:")
+    for r, n in sorted(buckets.items(), key=lambda x: -x[1]):
+        print(f"  {r:38s} {n:>14,}")
+    if require_projector and projector_params == 0:
+        raise RuntimeError(
+            "[lora-audit] FATAL: embed_vision projector has 0 trainable params. "
+            "Add 'embedding_projection' to modules_to_save or pass --no-train-projector "
+            "if you intentionally want to reproduce the legacy frozen-projector behavior."
+        )
+
+
 def _print_weight_table(weights: dict[str, float], counts_path: Path) -> None:
     counts: Counter = Counter()
     with open(counts_path) as f:
@@ -289,6 +331,13 @@ def main():
                         choices=["subtoken_mean", "random", "zero"],
                         default="subtoken_mean",
                         help="Embedding init for new <loc_*> tokens (discrete only).")
+    parser.add_argument("--train-projector", action="store_true", default=True,
+                        help="Train the multimodal projector (embed_vision.embedding_projection). "
+                             "Default ON: Unsloth's all-linear filter silently skips this top-level "
+                             "Linear, which froze the vision→LM bridge in runs B/C/D2/E/G. "
+                             "Pass --no-train-projector to reproduce the broken legacy behavior.")
+    parser.add_argument("--no-train-projector", dest="train_projector", action="store_false",
+                        help="Disable projector training (legacy/ablation only).")
     args = parser.parse_args()
 
     # Unsloth disables raw logit return by default (2024.11+) for memory savings.
@@ -317,12 +366,22 @@ def main():
         use_gradient_checkpointing="unsloth",
     )
 
-    modules_to_save: list[str] | None = None
+    modules_to_save: list[str] = []
     if args.coord_encoding == "discrete":
         _add_discrete_loc_tokens(
             model, processor.tokenizer, args.grid_size, args.init_strategy
         )
-        modules_to_save = ["embed_tokens", "lm_head"]
+        modules_to_save.extend(["embed_tokens", "lm_head"])
+
+    # The Gemma 4 multimodal projector (embed_vision.embedding_projection) is a
+    # top-level Linear that Unsloth's FastVisionModel target-module filter silently
+    # skips even with target_modules="all-linear" + finetune_vision_layers=True.
+    # Force it trainable via modules_to_save — the projector is the bridge between
+    # vision features and LM token space, and grounding lives in this layer. Runs
+    # B/C/D2/E/G all trained with this layer FROZEN, which is part of why none
+    # cleared baseline. Single Linear (~3M params), full fine-tune cost negligible.
+    if args.train_projector:
+        modules_to_save.append("embedding_projection")
 
     print(f"Attaching LoRA adapters (r={args.lora_r}, alpha={args.lora_alpha})...")
     peft_kwargs = dict(
@@ -339,10 +398,12 @@ def main():
         loftq_config=None,
         target_modules="all-linear",
     )
-    if modules_to_save is not None:
+    if modules_to_save:
         peft_kwargs["modules_to_save"] = modules_to_save
         print(f"  modules_to_save = {modules_to_save}")
     model = FastVisionModel.get_peft_model(model, **peft_kwargs)
+
+    _audit_lora_coverage(model, require_projector=args.train_projector)
 
     print(f"Loading dataset from {train_jsonl}...")
     # PIL images can't round-trip through Arrow, so we keep the dataset as a

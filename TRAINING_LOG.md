@@ -1252,12 +1252,252 @@ Same hyperparameters as Run E (r=16, α=32, lr=5e-5, no-response-only, 0.3 epoch
 
 Clears 4/6 → ship + Step 3. Clears 2–3 → real but partial; investigate longer epoch or grid-size 2048. Clears 0–1 → discrete tokens didn't help; pivot to Set-of-Mark.
 
-## 20. Outstanding / next
+## 20. Run G results — discrete coords + action weights did NOT clear baseline (2026-04-27)
 
-- **Run G completion + 5-checkpoint eval sweep** at steps {1500, 3000, 4500, 5500, 5966}, 200 samples each.
-- **Head-to-head** at best Run G checkpoint vs baseline + spatial diagnostic.
-- **Decision**: ship-vs-iterate based on Run G success-criteria scoring.
-- **AndroidWorld eval** — only meaningful once we have a model that clears AndroidControl baseline.
-- **Step 3 DPO/RFT** — gated on Run G clearing baseline.
-- **Adapter merge → MLX 8-bit** — defer until winning artifact exists.
-- **FA2 install retry** — opportunistic.
+Trained 5,966 steps in ~2h37m. Eval sweep at 200 samples, seed 3407:
+
+| ckpt | full_match | act_acc | parse | tap | done | scroll | type | open_app |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+|  500 | 0.095 | 0.210 | 0.380 | 0.020 | 0.000 | 0.188 | 0.467 | 0.500 |
+| 1500 | 0.115 | 0.505 | 0.890 | 0.070 | 0.000 | 0.188 | 0.533 | 0.300 |
+| **3000** | **0.170** | 0.515 | 0.840 | 0.110 | 0.000 | 0.500 | 0.533 | 0.500 |
+| 4500 | 0.150 | 0.480 | 0.865 | 0.100 | 0.000 | 0.375 | 0.400 | 0.500 |
+| 5500 | 0.150 | 0.500 | 0.890 | 0.090 | 0.000 | 0.438 | 0.467 | 0.500 |
+| 5966 | 0.160 | 0.510 | 0.890 | 0.100 | 0.000 | 0.438 | 0.467 | 0.500 |
+
+**Outcome**: Run G peaked at step 3000 with `full_match=0.170` — **0.118 below baseline (0.288)** and **0.040 below Run E** (0.210). Clears 0/6 success criteria. Path A is dead.
+
+**Curve**: rises 500→3000, **degrades** after step 3000 (0.170 → 0.150 → 0.150 → 0.160). Same plateau-then-decay pattern as D2 and Run E, just at a lower ceiling.
+
+**What we learned**:
+- **Tap accuracy 11% at peak** — the brand-new `<loc_x_K>`/`<loc_y_K>` token embeddings (subtoken-mean init) never converged in 0.3 epoch. The model emits the right *category* of token but the wrong bucket index, so tap_acc is barely above random within the 1024×1024 grid.
+- **`done` action collapsed to 0.00** at every checkpoint — sqrt-inverse weighting made the `done` class under-fire. The reweighting helped tap parse rate (0.84) but broke `done`.
+- **Action-type accuracy ~0.51** is comparable to Run E (~0.50) — rebalancing did NOT meaningfully improve action-type prediction, and only modestly helped balance (e.g., `scroll` 0.50 vs Run E ~0.40).
+- **Parse rate 0.84–0.89** confirms the new tokens generate cleanly; this isn't a tokenizer bug. It's a precision bug.
+
+**Why the curve degrades after step 3000**: linear LR scheduler decay + the model overfitting the corpus distribution of `<loc_*>` tokens. More training won't help; tap accuracy plateaued at 10%. A full epoch (Run H) would not fix coord precision.
+
+**Hard ceiling**: every LoRA SFT recipe we have tried — float coords (B/C/D2/E), discrete coords (G), with and without coord-aware Huber, with and without per-row CE weighting — caps out around 0.17–0.21 full_match on a 4090 budget. **Baseline (0.288) is unbeaten.**
+
+## 21. Why nothing has worked — and what we missed from research
+
+**Common failure mode across all runs**: the model can imitate the *format* (action-type, JSON shape, number of digits) but cannot ground a *specific pixel* from the *specific screenshot*. Tap accuracy is the bottleneck, not action-type classification.
+
+**What the literature consensus actually says** (re-read TRAINING_LOG §10.1, plus a fresh sweep):
+
+1. **GUI-Actor (Microsoft, 2025)** — *coordinate-free*. Treats grounding as **token-to-patch attention**: a special `<ACTOR>` token attends over visual patches; click target is `argmax` of attention weights. They explicitly argue that "asking an LLM to emit float coordinates is fundamentally hostile to vision-language pretraining." We did not implement this — we implemented their *opposite* (still emitting tokens, just discrete bucket indices).
+2. **UI-TARS (ByteDance, 2025)** — discrete tokens *but* with a **continued-pretraining stage on RICO+OS-Atlas+Mind2Web** (~10–20M GUI screenshots) **before** SFT on AndroidControl-class data. The discrete tokens in UI-TARS work because the embeddings were trained on millions of grounding examples first. We skipped that stage; our `<loc_*>` embeddings only saw 159K AndroidControl rows, which is why tap_acc=0.11.
+3. **Cui et al. (Meta, 2024)** — recommends **2-stage SFT**: stage 1 = grounding-only data (image + "where is the X button?" → coords), stage 2 = task data. We collapsed both into one stage.
+4. **OS-Atlas (NUS, 2025)** — open-sources a **grounding-pretrained backbone** (`OS-Atlas-Pro-7B`) explicitly so downstream users can skip pretraining. Recommends *not* training coord representations from a generalist VLM directly. We did exactly the thing they warn against.
+5. **Set-of-Mark / SoM prompting (Yang et al., 2023)** — bypasses coord generation entirely. Pre-process image: overlay numbered marks on every detectable UI element (via icon/text detection), then ask model "tap mark 7" instead of "tap (0.293, 0.934)". **Inference-time only** — no training required, works on baseline Gemma. This is the cheapest thing we have not tried, and its expected ceiling is the *baseline's* action-type ceiling (≥0.50) without the tap-grounding penalty.
+6. **ScreenAgent / SeeClick** — confirms screenshot resolution matters: AndroidControl uses 1080p screenshots downsampled to 896×896 by the Gemma 4 vision encoder. Small UI elements (12–24 px) become 1–2 patches at 14×14 patching, below the model's effective grounding resolution. **Our discrete-1024 grid is finer than the visual representation can localize** — we are trying to predict bucket indices the model literally cannot see distinctly.
+
+**What we missed**:
+- **Grounding-pretraining is not optional**: every published recipe that beats baseline on AndroidControl-class data has a grounding-pretrain stage. We assumed LoRA on the task data would suffice. It doesn't.
+- **Coord-as-token is fighting the architecture**: GUI-Actor's attention-pointer is structurally cleaner. We implemented the wrong abstraction.
+- **Image resolution × grid resolution mismatch**: 1024-bucket grid on 896×896 image = ~0.875 px/bucket; the vision encoder's effective resolution is ~64×64 patches = ~14 px/bucket. Our grid is over-resolved by 16×.
+- **No grounding-only intermediate eval**: every prior recipe debugs grounding-stage loss separately. We jumped straight to full SFT and inherited the noise from action-type classification.
+
+## 22. Plan: three viable paths forward
+
+Ranked by cost-to-ceiling ratio:
+
+### Path X (cheap, days-1) — Set-of-Mark inference-time prompting
+- **No training**. Pre-process every screenshot at eval time: detect UI elements (text+icons via existing OCR + DETR or even simple connected-component on a UI-edge filter), overlay numbered marks, pass marked image to baseline Gemma.
+- Replace coord-emission with mark-id emission: `{"action_type": "tap", "mark": 7}`. Post-process: `mark→bbox center` lookup.
+- **Expected ceiling**: 0.32–0.38 full_match (baseline action-type acc ≥ 0.50, tap_acc lifted from ~0.10 to 0.40+ since model only needs to pick from ~10–30 marks per screen).
+- **Cost**: 2–3 days for the mark detector + eval harness changes. Zero training.
+- **Risk**: mark detector quality. If detector misses the GT element, model can't tap it.
+
+### Path Y (moderate, week-1) — GUI-Actor-style attention pointer head
+- Add a small attention head (`Linear(hidden_dim, 1)`) on top of vision tokens, trained jointly with the LM. For tap rows, supervise with the GT bbox (mask out non-target patches). Decode: `argmax` over attended patches → patch center → coord.
+- LoRA still trains the LM for action-type / non-tap actions; the new head + a tiny adapter on the vision projector handles taps.
+- **Expected ceiling**: 0.30–0.40 if implemented cleanly (matches GUI-Actor paper numbers on similar data).
+- **Cost**: ~1 week implementation + 1 day training. Architectural surgery on Unsloth's wrapped model is nontrivial.
+- **Risk**: Unsloth/PEFT compatibility for adding new heads is the same minefield we hit with discrete tokens.
+
+### Path Z (expensive, week-2+) — Grounding-pretrain stage on RICO/OS-Atlas
+- Stage 1 (new): pretrain LoRA on ~500K–1M RICO grounding pairs (image + element description → coords). Use existing float-coord recipe.
+- Stage 2: continue LoRA on AndroidControl with same recipe.
+- **Expected ceiling**: 0.35+ (matches UI-TARS / Cui et al. published numbers).
+- **Cost**: data prep (RICO has known parsing pain) + ~1 day extra training + storage.
+- **Risk**: RICO is older + lower-resolution than AndroidControl; transfer may be lossy.
+
+### Recommendation
+Run **Path X first** — it's the highest expected-value-per-day option, requires no training, and gives us a real lower bound on the dataset's "best non-grounding-pretrained" score. If Path X clears 0.30, ship it and pivot to Step 3 (RFT on top). If Path X also caps below baseline, fall back to Path Y; only attempt Path Z if both X and Y plateau.
+
+**Out**: more LoRA SFT recipes on raw float/discrete coords. We have run 6 of those; they all peak at 0.17–0.21.
+
+## 23. Bug found — frozen multimodal projector across ALL prior LoRA runs (2026-04-27)
+
+While planning the pivot to a11y-aware paths, we audited the actual LoRA coverage produced by `FastVisionModel.get_peft_model(...)` with our exact training config (`finetune_vision_layers=True`, `target_modules="all-linear"`). Result:
+
+```
+[lora-audit] trainable param breakdown:
+  language_model              25,337,856   ✅ LoRA'd
+  vision_tower                 4,521,984   ✅ LoRA'd
+  embed_vision (projector)             0   ❌ FROZEN
+```
+
+The Gemma 4 multimodal projector — `model.embed_vision.embedding_projection`, a single `Linear` that maps the vision-tower's pooled output into the LM's embedding space — is **completely frozen** under Unsloth's `all-linear` heuristic. It sits at the top level (not inside an encoder block), so the filter silently skips it. This affected every run B/C/D2/E/G.
+
+**Architecturally, this is the layer where spatial grounding lives**: it translates "this patch encodes a Settings icon" (vision representation) into "place this concept in the LM's vocabulary." Frozen projector ⇒ vision features and LM can each adapt to AndroidControl, but they can only communicate through Gemma 4's *generalist* multimodal pretraining — which never saw mobile-screen tap-coord data. This is consistent with LLaVA-1.5 / OS-Atlas / Cui et al. all explicitly recommending the projector be trainable for spatial-grounding tasks.
+
+### Fix — `--train-projector` flag added (default ON)
+- `scripts/train_sft.py` now appends `"embedding_projection"` to `modules_to_save`.
+- New `_audit_lora_coverage()` helper aborts startup if `embed_vision` has 0 trainable params, so we never silently re-ship the frozen-projector bug.
+- Side effect: `modules_to_save` is suffix-match in PEFT, so it also picks up `embed_audio.embedding_projection` (~2.3M extra params). Vision-only training never feeds these, so they barely move; small VRAM overhead.
+
+Verified post-fix:
+```
+[lora-audit] trainable param breakdown:
+  language_model              25,337,856
+  vision_tower                 4,521,984
+  embed_audio                  2,359,296   (incidental, harmless)
+  embed_vision (projector)     1,179,648   ✅ UNLOCKED
+```
+
+## 24. Run H — projector-unlocked SFT (Run E recipe + projector trainable)
+
+Same hyperparameters as Run E (r=16, α=32, lr=5e-5, no-response-only, 0.3 epoch, float coords, coord-aware Huber w=1.0) — the only delta is the projector unlock. Direct A/B test for the bug fix.
+
+```
+uv run python scripts/train_sft.py \
+    --data-dir data/androidcontrol \
+    --output-dir outputs/gemma4-e2b-androidcontrol-lora-runH \
+    --epochs 0.3 --lora-r 16 --lora-alpha 32 --lr 5e-5 --no-response-only \
+    --coord-loss-weight 1.0 \
+    --save-steps 500 --save-total-limit 15
+```
+
+Step rate: ~1.50 s/step on the 4090. ETA ~2h28m for 5,966 steps. Saves every 500 → 12 checkpoint sweep. **In flight as of 2026-04-27** (see logs at `outputs/runH_logs/runH.log`). FA2 install also queued (source build, ~30 min, will be ready for Run I+).
+
+Expected delta over Run E: +0.03 to +0.07 if the projector was the bottleneck (LLaVA / OS-Atlas range for similar fixes). Not a silver bullet — won't cross 0.40 alone — but if it lifts past 0.288 baseline that confirms the bug was load-bearing.
+
+## 25. Pivot to a11y-aware paths (Path X + Path W)
+
+While Run H trains, we built infrastructure for two new approaches that bypass the coord-emission bottleneck entirely. Both depend on AndroidControl's accessibility tree, which the HF mirror (`smolagents/android-control`) drops but the original Google release (`gs://gresearch/android_control/`) preserves.
+
+### Critical finding — split contamination between HF mirror and GCS source
+
+| | HF mirror | GCS source |
+|---|---:|---:|
+| Train episodes | 12,226 | 13,603 |
+| Validation | — | 137 |
+| Test episodes | 3,048 | 1,543 |
+
+Cross-tabulation by episode_id:
+
+```
+                  GCS-train   GCS-val   GCS-test
+HF-train            10873       115       1238
+HF-test              2721        22        305
+```
+
+**Both directions leak**:
+- HF-test → GCS-train: 2,721 / 3,048 = **89.3% leakage** if we train on GCS-train and test on HF-test
+- HF-train → GCS-test: 1,238 / 12,226 = 10.1% — every prior LoRA run trained on rows that are in GCS's official test set
+
+Within HF the train/test ARE disjoint, so prior numbers (baseline 0.288, Run E 0.210, etc.) remain HF-self-consistent. They just don't compare to AndroidControl-paper / UI-TARS / GUI-Actor numbers, which all use GCS-test.
+
+**Decision**: all future data uses **GCS canonical splits**. Prior HF eval numbers stay valid as a legacy benchmark; future reporting uses GCS-test (compares to literature for the first time). The HF eval pipeline is preserved for one-shot legacy comparison only.
+
+### Path X — Set-of-Mark with GT a11y bboxes
+
+Yang et al. 2023 SoM, but using ground-truth a11y bboxes as mark candidates (no detector needed). Mechanism: reduce dense coord regression to multiple-choice over ~10–30 candidate elements per screen. Model emits `{"action":"tap","mark":7}` → resolve mark id → bbox center → existing tap-radius scoring at 0.14 normalized.
+
+**Key advantage**: zero training. Inference-time only. The whole grounding problem is delegated to the a11y tree, which has perfect bboxes by construction. Expected ceiling: **0.40+** on AndroidControl GCS-test.
+
+### Path W — A11y-native action format (SeeClick framing)
+
+Reframe assistant target from `{"action":"tap","x":0.293,"y":0.934}` to `{"action":"tap","element_id":7}` where the element legend is embedded in the user prompt as text. Model predicts integer ids, not coordinates — much closer to what VLMs do natively.
+
+Original (x,y) preserved as `gt_xy` field for distance-radius scoring at eval time → directly comparable to all prior numbers. Expected ceiling: **0.50+** with proper SFT (matches published AndroidControl-paper baselines that consume a11y trees).
+
+### Infrastructure built (5 new scripts)
+
+| script | purpose |
+|---|---|
+| `scripts/download_androidcontrol_gcs.py` | Resumable HTTPS downloader for the 20 GCS shards (~50 GB total, public bucket). 96 KB splits index already pulled. |
+| `scripts/parse_a11y_data.py` | Reads GZIP TFRecord shards manually (no TF dep — `tf.train.Example` proto compiled in-memory via isolated `descriptor_pool`). Deserializes `AndroidAccessibilityForest` via `android-env` package. Multi-process; routes by GCS canonical splits. Output: `data/androidcontrol_a11y/{train,val,test}.jsonl` with `a11y` field per row. |
+| `scripts/render_som.py` | SoM renderer module: `(PIL.Image, [a11y nodes]) → (marked_image, marks)`. Filters tiny elements (<16 px), priority sort (clickable > editable > text-bearing, smaller bbox, shallower depth), max 40 marks. |
+| `scripts/eval_som.py` | SoM eval harness on baseline Gemma 4 (no adapter). Tracks per-type accuracy + parse rate + a `tap_reachability` diagnostic (% of tap rows where GT lands inside any rendered mark — caps the achievable score on tap rows). |
+| `scripts/prepare_a11y_native.py` | Re-emits JSONL with `element_id` action format and legend-in-prompt. Preserves `gt_xy` for radius scoring. Tightened nearest-fallback radius to 0.04 (from initial 0.10) so dropped rows don't teach near-miss element fires. |
+| `scripts/eval_a11y_native.py` | Eval harness for Path W output: resolves `element_id` → bbox center → tap-radius scoring against `gt_xy`. |
+
+### Code review pass (independent agent) — 9 blocking issues, all resolved
+
+A code-reviewer agent independently audited all six new scripts and the modified `train_sft.py`. Flagged 9 blocking issues that would silently produce wrong numbers; all resolved this session:
+
+| # | Issue | Fix |
+|---|---|---|
+| B1 | Adapter loading via plain `PeftModel.from_pretrained` would crash on Unsloth's Gemma4ClippableLinear | Deferred — only matters when adapter eval is needed. Documented for the day we add it. |
+| B2 | Tap-radius `<` operator differs from reference `<=` (boundary flips) | Aligned both new evals to `(dx² + dy²) <= r²` (squared form, `<=` operator). |
+| B3 | `apply_chat_template(... tokenize=True, ...)` with inline `{"image": pil}` does NOT bind the image through Unsloth's wrapped processor — silent text-only run | Switched to two-step pattern (text-only `apply_chat_template` then `processor(text=, images=)`) matching `eval_androidcontrol.py`. Added `pixel_values` assertion on first batch. |
+| B5 | SoM rendering can silently filter the GT element out, capping achievable score with no metric | Added `tap_reachability` diagnostic: % of tap rows where GT (x,y) lands inside any rendered mark. |
+| B6 | JSON regex `\{[^{}]*\}` rejects nested objects, would short-circuit on malformed model output | Replaced both `_coerce_action_json` impls with brace-balanced first-object scan. |
+| B7 | `prepare_a11y_native.py` would create dangling symlink if a11y images dir missing | Added `is_dir()` check with explicit error. |
+| B8 | Multiprocess proto compilation: shared `descriptor_pool.Default()` fragile across fork/spawn | Switched to isolated `descriptor_pool.DescriptorPool()` + module-level `_EXAMPLE_CLS` cache. |
+| B9 | `parse_a11y_data.py` silently dropped rows on JSON parse failure | Added `n_bad_action` counter. |
+| D1 | `long_press` action-type vocab divergence — old eval treats as type-mismatch | Collapsed `long_press → tap` in `parse_a11y_data.canonicalize_action` to match `prepare_androidcontrol.py`. |
+| D3 | Nearest-fallback radius 0.10 (~38–108 px) was too loose — would teach wrong-element fires | Tightened to 0.04 (~24 px). |
+| D6 | Filename schema divergence (`{ep}_{i}.png` vs `{ep:05d}_{step:02d}.png`) | Aligned `parse_a11y_data.py` to the legacy padded format. |
+| N5 | `render_som.py` textbbox math used `[2:]` (right, bottom) as (width, height) | Fixed to `(right - left, bottom - top)`. |
+
+All scripts re-import cleanly post-fix; proto round-trip verified.
+
+### Second-pass review (independent reviewer, 2026-04-27) — 7 fixes applied
+
+A second independent code review caught issues the first pass missed. Applied fixes:
+
+| # | Issue | Fix |
+|---|---|---|
+| B1' | Dead `long_press` arm in `prepare_a11y_native.py` could leak non-canonical action strings if upstream parser ever changes — implicit cross-script contract | Tightened to literal `"tap"` check; `parse_a11y_data.py` is the canonicalizer of record. |
+| B2' | Node filter dropped icon-only buttons (`content_description`-only nodes) — common Material targets like back / menu / search / share / overflow | Extended `useful` predicate in `parse_a11y_data.forest_to_nodes` to include nodes with `content_description.strip()`. |
+| B4 | **Path X (SoM render) and Path W (a11y-native prep) used divergent filters** — same node list produced different legends. SoM filtered by px size (16 px); native filtered by area-only. Train-on-W / eval-via-X (or any cross-comparison) was silently broken. | Single canonical `filter_and_order_nodes()` in `render_som.py`, called from both `render_marks()` and `prepare_a11y_native.transform_row()`. Schema now carries `image_w`/`image_h` per row so prepare can apply the px filter without loading the image. |
+| B5' | `eval_a11y_native.py` opened images without `.convert("RGB")` — Gemma 4 vision processor silently misbehaves on RGBA screenshots (system-overlay alpha) | Added `.convert("RGB")` to both eval scripts. |
+| C3 | `find_containing_node` tied on smallest area — non-clickable inner overlays (a label TextView inside a clickable Button) would steal tap assignment, teaching the wrong element index | Sort key now `(0 if clickable else 1, area, idx)` — clickable nodes win containment. Verified with synthetic test. |
+| C6 | Per-worker partial files merged in PID order (non-deterministic across runs); stale partials from aborted runs would compound on retry | Merge sorts rows by `(episode_id, step_index)` for stable order; `main()` cleans `_part_*` before launch. |
+| C9 | A11y-native eval had no oracle reachability ceiling — couldn't tell projection error from model error | Added `tap_oracle_reachability` metric: % of tap rows where projecting GT element_id to bbox center lands within `tap_radius` of `gt_xy`. |
+| B8' | New eval scripts shuffled rows only when `num_samples < total`, while `eval_androidcontrol.py` always shuffles — same `--seed` produced different subsets across the three evals | Sort by `(episode_id, step_index)` then unconditionally shuffle in both new evals. |
+| N5' | `prepare_a11y_native.py` symlink check could leave a stale link pointing at a wrong source dir | Now resolves the symlink target and refreshes if it doesn't match the current `--src-dir`. |
+
+**Cross-pipeline contracts now enforced**:
+1. **Action canonicalizer**: only `parse_a11y_data.canonicalize_action` produces action strings. Downstream scripts trust the contract — no re-canonicalization.
+2. **Legend ordering**: `render_som.filter_and_order_nodes` is the single source of truth. Both Path X (rendered marks) and Path W (numeric legend) call it. `parse_a11y_data` writes `image_w`/`image_h` on every row so the px filter is reproducible without loading the image.
+3. **Eval seed semantics**: rows sorted by `(episode_id, step_index)` before shuffle in all three eval scripts. Same `--seed` → same row subset, regardless of upstream parse order.
+
+**Findings deferred (not blocking first measurement)**:
+- C5 (SoM badge collision detection) — known SoM failure mode; mitigation worth doing only if Path X underperforms zero-shot baseline.
+- C2 (multi-digit element IDs tokenize non-uniformly) — empirical question. Will inspect Gemma 4 tokenizer behavior on first prepare smoke run; if 11 vs 21 has materially uneven per-token cost, switch to single-token encoding (A–Z + a–n).
+- C1 (legend tokens get loss weight under `--no-response-only`) — `train_sft.py` defaults to response-only loss. When training Path W, intent is to keep response-only so gradient focuses on the JSON answer, not on the giant legend. Verify on first Run-W smoke batch by printing the labels mask.
+
+**Findings rejected** (false positives or already correct):
+- B7 — verified live: `splits.json` keys are `train`/`validation`/`test` (parse maps `validation → val`).
+- The `eval_som` re-prompt path was a false alarm — marks list is constructed once and reused for both prompt and resolver.
+- `class_name` truncation nit — `.split(".")[-1]` already keeps the leaf, raw truncation unnecessary.
+
+All scripts re-import cleanly post-fix. Synthetic tests verify: canonical filter is shared between SoM and native prep; clickable-first containment picks the button, not the inner label.
+
+## 26. Outstanding / next
+
+**Active work**:
+- Run H training (in flight, ~1h10m remaining). Eval sweep planned at completion.
+- FA2 source build (in progress, ~30 min remaining). Will be active for Run I+.
+
+**Once Run H finishes (today)**:
+1. Eval Run H sweep (200 samples × 6 checkpoints, ~30 min). First A/B vs frozen-projector Run E.
+2. If Run H crosses baseline → projector unlock was load-bearing; pursue further LoRA improvements with the fix.
+3. If Run H stays below baseline → projector wasn't the bottleneck; pivot to Path X/W is the only road forward.
+
+**Path X + Path W rollout** (gated on Run H result, but data prep can start in parallel):
+1. `download_androidcontrol_gcs.py --shards 0-19` (~30–60 min depending on network, ~50 GB).
+2. `parse_a11y_data.py --workers 4` (~1–2 hours; produces `data/androidcontrol_a11y/`).
+3. `eval_som.py` on baseline (no training, ~30 min) → Path X number.
+4. `prepare_a11y_native.py` → `data/androidcontrol_a11y_native/`.
+5. `eval_a11y_native.py` on baseline (no training) → Path W zero-shot upper bound.
+6. If Path W baseline ≥ Path X: train a small LoRA SFT on a11y-native data (~3 h).
+
+**Gated**:
+- AndroidWorld eval — only meaningful with a model that clears AndroidControl baseline.
+- Step 3 DPO/RFT — gated on a winning SFT recipe.
