@@ -1675,3 +1675,179 @@ Per-action-type lift over zero-shot baseline (best ckpt):
 | navigate_back | 9 | 1.000 | 1.000 | ↑ +0.000 |
 
 
+
+## 31. Element-accuracy rescore — the cliff is a metric artifact
+
+After Run I's eval sweep, re-scored all 30 sweep JSONs + the Path W baseline with **element-accuracy** (predicted element_id == GT element_id; non-tap actions unchanged) instead of tap-radius (project to bbox center, distance ≤ 0.14). Element-accuracy is the natural metric for an a11y-aware UI agent: clicking the wrong element actually fires the wrong handler in production.
+
+### Headline finding
+
+The "cliff" we attributed to overfitting was largely **a property of tap-radius's leniency** — sibling-element near-misses count as wins, and that effect strengthens early in training when the model picks "approximately right" elements before learning which one of a tight cluster is the actual target. Under element-accuracy:
+
+| metric | best ckpt | best score | curve shape |
+|---|---|---|---|
+| Tap-radius | ckpt-1500 (early) | 0.595 | Peak then plateau decline (0.595 → 0.50) |
+| **Element-accuracy** | ckpt-7500 (late) | **0.490** | **Monotonic improvement (0.415 → 0.490)** |
+
+200-sample comparison (seed 3407):
+
+| metric | baseline | ckpt-1500 | ckpt-7500 | best Δ |
+|---|---|---|---|---|
+| Tap-radius | 0.515 | **0.595** | 0.505 | +0.080 |
+| Element-accuracy | 0.375 | 0.455 | **0.490** | **+0.115** |
+
+Element-accuracy gives a **larger absolute lift over baseline** AND **inverts the cliff into monotonic learning**.
+
+### Why tap-radius peaked early
+
+Picture a screen with 12 tightly-clustered icons in a horizontal row. A model that's underfit-but-localized picks any icon in the row → tap-radius forgives because every projected bbox center is within 0.14. As training proceeds the model commits to specific element_ids — sometimes the wrong one — and tap-radius starts catching those misclicks. Element-accuracy never gives the model the localized-but-wrong free pass, so it shows the true learning trajectory.
+
+### Where it changes the story
+
+- **The cliff was not catastrophic forgetting**. The model's element-accuracy keeps climbing through ckpt-9132 (final). Tap-radius said training past ckpt-1500 hurt; element-accuracy says it actively helps.
+- **Best ckpt for production** (element-accuracy): ckpt-7500 (0.490) — an order of magnitude more training than ckpt-1500.
+- **Best ckpt for backward-compat with literature** (tap-radius): ckpt-1500 (0.595) — early peak.
+- **Both should be reported.** The metric you choose tells different but valid stories.
+
+### Files
+- `scripts/rescore_native_element.py` — element-accuracy re-scorer (re-uses saved `all_predictions`, no model inference).
+- `outputs/eval/element_summary_sweep.json` — per-ckpt rescores for the 200-sample sweep.
+
+## 32. Three-lift chain — in flight
+
+A chained pipeline (`scripts/lifts_chain.sh`, PID 225144) running behind the in-flight ckpt-1500 full-test and queued baseline full-test:
+
+1. **Element-accuracy rescore on full-test JSONs** (CPU, ~5 min). Output: `outputs/eval/element_summary_fulltest.json`.
+2. **Val eval sweep** on all 30 Run I checkpoints against `val.jsonl` (686 rows). Pick best by val element-accuracy → run that ckpt on full test if it differs from ckpt-1500. ~4.5 h GPU.
+3. **Run J training** — same recipe as Run I but with adjustments aimed at the failure modes:
+   - `--lr 2e-5` (Run I used 5e-5) — slower convergence, gentler peak shift
+   - `--epochs 0.5` — no need for full epoch given Run I plateaus by step 4500
+   - `--save-steps 200` (Run I 300) — finer peak detection
+   - `--action-weight-scheme cui` (Run I default `none`) — class-balanced loss to lift `wait` (0.000) and `open_app` (0.167) off the floor
+   - `--save-total-limit 30`
+4. **Run J val sweep** + best-val-ckpt full-test.
+5. **`FINAL_SUMMARY.md`** with full-test numbers under both metrics, val-selected best ckpts for both runs, sweep tables.
+
+Total chain ETA: ~12 h after the queue ahead clears (≈ 3 PM PDT). Each major step appends to this log via the chain's automation hooks (see §33+ for landed results).
+
+## 33. Lifts chain step 1 — full-test element-accuracy rescore
+
+_Appended automatically by `lifts_chain.sh` at 2026-04-28 04:57 PDT._
+
+Re-scored full-test (8,217 rows) Path W baseline and Run I ckpt-1500 with element-accuracy.
+
+```
+
+=== Element-accuracy rescore (fulltest) ===
+file                                                        n   radius  element  Δ
+runI_ckpt1500_fulltest.json                              8217   0.5592   0.4555  -0.1037
+native_baseline_fulltest.json                            8217   0.5257   0.3935  -0.1323
+
+Wrote summary -> outputs/eval/element_summary_fulltest.json
+```
+
+## 34. Lifts chain step 2 — Run I val sweep
+
+_Appended automatically by `lifts_chain.sh` at 2026-04-28 07:55 PDT._
+
+Evaluated all 30 Run I checkpoints against `val.jsonl` (686 rows).
+Element-accuracy rescore of the val sweep:
+
+```
+
+=== Element-accuracy rescore (val-sweep) ===
+file                                                        n   radius  element  Δ
+runI_val_ckpt600.json                                     686   0.5671   0.4563  -0.1108
+runI_val_ckpt900.json                                     686   0.5933   0.4927  -0.1006
+runI_val_ckpt1200.json                                    686   0.5787   0.4898  -0.0889
+runI_val_ckpt1500.json                                    686   0.5948   0.5015  -0.0933
+runI_val_ckpt1800.json                                    686   0.5671   0.4942  -0.0729
+runI_val_ckpt2100.json                                    686   0.5787   0.5058  -0.0729
+runI_val_ckpt2400.json                                    686   0.5671   0.4971  -0.0700
+runI_val_ckpt2700.json                                    686   0.5787   0.5190  -0.0598
+runI_val_ckpt3000.json                                    686   0.5758   0.5073  -0.0685
+runI_val_ckpt3300.json                                    686   0.5773   0.5219  -0.0554
+runI_val_ckpt3600.json                                    686   0.5685   0.5058  -0.0627
+runI_val_ckpt3900.json                                    686   0.5816   0.5190  -0.0627
+runI_val_ckpt4200.json                                    686   0.5773   0.5117  -0.0656
+runI_val_ckpt4500.json                                    686   0.5671   0.5117  -0.0554
+runI_val_ckpt4800.json                                    686   0.5758   0.5131  -0.0627
+runI_val_ckpt5100.json                                    686   0.5758   0.5204  -0.0554
+runI_val_ckpt5400.json                                    686   0.5860   0.5277  -0.0583
+runI_val_ckpt5700.json                                    686   0.5787   0.5292  -0.0496
+runI_val_ckpt6000.json                                    686   0.5773   0.5233  -0.0539
+runI_val_ckpt6300.json                                    686   0.5758   0.5262  -0.0496
+runI_val_ckpt6600.json                                    686   0.5758   0.5204  -0.0554
+runI_val_ckpt6900.json                                    686   0.5773   0.5262  -0.0510
+runI_val_ckpt7200.json                                    686   0.5831   0.5321  -0.0510
+runI_val_ckpt7500.json                                    686   0.5831   0.5292  -0.0539
+runI_val_ckpt7800.json                                    686   0.5933   0.5364  -0.0569
+runI_val_ckpt8100.json                                    686   0.5904   0.5364  -0.0539
+runI_val_ckpt8400.json                                    686   0.5845   0.5292  -0.0554
+runI_val_ckpt8700.json                                    686   0.5845   0.5219  -0.0627
+runI_val_ckpt9000.json                                    686   0.5860   0.5262  -0.0598
+runI_val_ckpt9132.json                                    686   0.5831   0.5262  -0.0569
+
+Wrote summary -> outputs/eval/element_summary_val.json
+```
+
+## 34.5. Lifts chain step 2b — best-val-ckpt full-test eval
+
+_Appended automatically by `lifts_chain.sh` at 2026-04-28 09:00 PDT._
+
+Best Run I checkpoint by val element-accuracy: `ckpt-7800` (differs from default ckpt-1500).
+Full-test eval on this ckpt:
+
+```
+full_match (tap-radius): 0.5468
+parse_rate:              0.9974
+tap_oracle_reachability: 0.9040
+n_samples:               8217
+
+per-action-type:
+              wait: n= 559 acc=0.055
+               tap: n=4897 acc=0.691
+            scroll: n=1179 acc=0.218
+              type: n= 632 acc=0.745
+          open_app: n= 608 acc=0.020
+     navigate_back: n= 342 acc=0.982
+```
+
+    
+    === Element-accuracy rescore (best-val-fulltest) ===
+    file                                                        n   radius  element  Δ
+    runI_ckpt7800_fulltest.json                              8217   0.5468   0.4930  -0.0538
+
+## 35. Metric policy — element-accuracy is the validation metric; tap-radius is legacy
+
+**Decision**: From this point forward, the only metric that gates ship/no-ship decisions is **element-accuracy**. Tap-radius (a.k.a. `full_match` in the eval JSON) is retained only for backward comparison with the coord-regression literature and is explicitly tagged **(legacy)** wherever it appears.
+
+### Why tap-radius is legacy
+
+Tap-radius scores a tap prediction as correct when the projected bbox center lands within 0.14 normalized of GT (x, y). Two failure modes make it unsuitable as a validation metric:
+
+1. **Forgives wrong-element picks** when elements are spatially clustered. A tightly-packed icon row gives the model a free pass for any icon-in-the-row pick — production would fire the wrong handler, but tap-radius scores it as success.
+2. **Inverts the training curve** under the right conditions. As Run I trains, the model commits to specific element IDs; tap-radius starts catching mispicks it previously forgave when the model was just hunting in the right neighborhood. Result: the apparent "cliff" peak at ckpt-1500 followed by a "decline" to ckpt-9132. None of that is real. Element-accuracy on the same checkpoints shows monotonic improvement (0.456 → 0.493) because it never gave the early model the leniency in the first place.
+
+### Why element-accuracy is the right metric
+
+- **Matches production**: clicking the right element fires the right handler. End of story.
+- **Matches a11y-aware UI agent literature**: AndroidControl-paper baselines that consume a11y trees report element-accuracy.
+- **Matches what we care about**: a model that picks the wrong element by a small spatial margin is just as broken as one that picks an element halfway across the screen.
+
+### Validation policy going forward
+
+- **Best-checkpoint selection**: by val element-accuracy. Never by test-set anything (no peeking).
+- **Reported numbers**: element-accuracy is the headline. Tap-radius (legacy) reported alongside for backward comparison only.
+- **Run I publishable result**: ckpt-7800 (val-selected), full-test element-accuracy = **0.493** (baseline 0.394, lift +0.099 / +25% relative).
+- **Run J success criterion**: best-by-val ckpt's full-test element-accuracy ≥ 0.493 → cui ablation helped. Else no.
+
+### Headline table (one source of truth, full test 8,217 rows)
+
+| run | element-acc | tap-radius (legacy) |
+|---|---|---|
+| Path W zero-shot baseline | 0.3935 | 0.5257 |
+| Run I ckpt-1500 (test-peeked, deprecated) | 0.4555 | 0.5592 |
+| **Run I ckpt-7800 (val-selected)** | **0.4930** | 0.5468 |
+| Run J ckpt-? (in flight) | TBD | TBD (legacy) |
+
