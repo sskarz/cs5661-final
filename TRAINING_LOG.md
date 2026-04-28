@@ -1851,3 +1851,43 @@ Tap-radius scores a tap prediction as correct when the projected bbox center lan
 | **Run I ckpt-7800 (val-selected)** | **0.4930** | 0.5468 |
 | Run J ckpt-? (in flight) | TBD | TBD (legacy) |
 
+## 35.5. Training-speedup investigation — dataloader workers were starving the GPU
+
+_2026-04-28, mid-Run-J. Patch applied to `scripts/train_sft.py` for Run K and later; Run J was not interrupted._
+
+**Symptom**: Run J on the 4090 was averaging ~2.13s/step (300 steps every 638-639s, measured from checkpoint mtimes). At step 3300/9132 (≈36%) projected ~3.5h remaining on a 1-epoch SFT.
+
+**Diagnosis**: passive `nvidia-smi` sampling at 1 Hz showed GPU utilization oscillating `100, 0, 99, 1, 100, 0, 100, 100`. That alternating idle pattern is the classic signature of a dataloader-starved trainer — the GPU finishes a step, then waits for the next batch. Training process had only 16 threads (matching the parent + Inductor compile workers), confirming `dataloader_num_workers=0` (the HF Trainer default and what `train_sft.py` was inheriting).
+
+The cost being paid every step on the main thread:
+- `PIL.Image.open(img_path).convert("RGB")` on a 1080×2400 PNG (image dir is 37 GB across 83,848 files).
+- `UnslothVisionDataCollator` text + image preprocessing for a batch of 4.
+
+With workers=0, all of this runs serially between GPU steps, so a 4090 with 19.7 / 24.5 GB VRAM and 100% nominal "utilization" was actually idle for a measurable fraction of every cycle.
+
+**Fix** (commit landing alongside this section): four new CLI flags on `scripts/train_sft.py`, with defaults chosen so future runs inherit the speedup without script-level changes:
+
+- `--dataloader-num-workers 8` (was 0). Box has 16 cores; 8 workers leave headroom for the main process + Inductor compile pool.
+- `--dataloader-prefetch-factor 4`.
+- `--no-dataloader-persistent-workers` opt-out flag; persistent workers are **on** by default to skip respawn between epoch / eval boundaries.
+- `pin_memory=True` made explicit (was the TRL default already).
+
+The new SFTConfig kwargs are gated so `--dataloader-num-workers 0` still produces a valid PyTorch DataLoader (`prefetch_factor=None`, `persistent_workers=False` in that case), preserving the legacy code path as a fallback.
+
+**Worker-safety audit before shipping**:
+
+- `AndroidControlDataset.__getitem__` returns a dict containing a `PIL.Image` — pickle-safe, so multiprocessing workers can ship results back to the main process.
+- `UnslothVisionDataCollator` runs inside the worker (per PyTorch DataLoader convention) and only touches CPU paths (tokenizer + image processor); it never touches CUDA, so fork-based workers won't deadlock on the parent's CUDA context.
+- `CoordAwareCollator` wraps the base collator and emits plain CPU tensors via `torch.tensor(...)` — also worker-safe.
+- Validated end-to-end: constructed `SFTConfig(dataloader_num_workers={0,8}, dataloader_persistent_workers={False,True}, dataloader_prefetch_factor={None,4}, dataloader_pin_memory=True)` in a side-process; both configurations round-trip cleanly through the dataclass.
+
+**Why Run J is not being restarted**: at ~36% with monotonically dropping loss and ckpts on disk every 300 steps, the cost of restarting (≈ 1 h re-tokenize / re-init + ≈ 2 h to re-reach step 3300) outweighs the wall-clock gain on the remaining 5,832 steps even under an optimistic 1.7× speedup. Patch lands now, takes effect on Run K.
+
+**Expected impact on Run K**: filling the 30-50% idle gaps observed in Run J's `nvidia-smi` trace should bring step time from ~2.13 s to roughly ~1.3–1.5 s — a ≈30–50% wall-clock reduction on an otherwise mathematically identical recipe. Verification path: kick off Run K, sample `nvidia-smi -l 1` for 10 s; if utilization stays pegged near 100 with no 0-dips, the fix landed.
+
+**Tier-2 wins not applied** (require a smoke run to verify no regression; flagged here so they are not lost):
+
+1. Pre-resize images offline to the vision tower's native input size. Resizing 1080×2400 PNGs every step is pure CPU waste; a one-off `prepare_*` pass that writes the resized array would remove a chunk of per-step CPU after workers stop being the bottleneck.
+2. Drop `use_gradient_checkpointing="unsloth"`. ~25-30% step-time win, but loses the ≈2× memory savings — current ~4.7 GB VRAM headroom is tight, would need a smoke run to confirm no OOM at peak sequence length.
+3. `--batch-size 8 --grad-accum 1` (same effective batch=8). Same memory caveat as (2).
+

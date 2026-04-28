@@ -338,6 +338,22 @@ def main():
                              "Pass --no-train-projector to reproduce the broken legacy behavior.")
     parser.add_argument("--no-train-projector", dest="train_projector", action="store_false",
                         help="Disable projector training (legacy/ablation only).")
+    # Dataloader knobs. Default num_workers=0 in HF Trainer starves the GPU on
+    # this dataset: each step blocks the main thread on PIL.open() of a 1080x2400
+    # PNG. Run J GPU util oscillated 100/0/100/0 in 1s samples. Spawning workers
+    # lets image decode overlap with GPU compute. Conservative defaults below
+    # (8 workers, prefetch 4, persistent) — the box has 16 cores and 21GB free RAM.
+    parser.add_argument("--dataloader-num-workers", type=int, default=8,
+                        help="DataLoader worker processes. 0 = main-thread loading "
+                             "(legacy default; provably GPU-starves this dataset).")
+    parser.add_argument("--dataloader-prefetch-factor", type=int, default=4,
+                        help="Batches each worker prefetches. Ignored when "
+                             "--dataloader-num-workers=0.")
+    parser.add_argument("--no-dataloader-persistent-workers",
+                        dest="dataloader_persistent_workers",
+                        action="store_false", default=True,
+                        help="Disable persistent_workers. Default ON keeps workers "
+                             "alive across epochs/eval boundaries (avoids respawn cost).")
     args = parser.parse_args()
 
     # Unsloth disables raw logit return by default (2024.11+) for memory savings.
@@ -493,6 +509,20 @@ def main():
         dataset_text_field="",
         dataset_kwargs={"skip_prepare_dataset": True},
         max_length=args.max_length,
+        dataloader_num_workers=args.dataloader_num_workers,
+        dataloader_pin_memory=True,
+        dataloader_persistent_workers=(
+            args.dataloader_persistent_workers and args.dataloader_num_workers > 0
+        ),
+        dataloader_prefetch_factor=(
+            args.dataloader_prefetch_factor if args.dataloader_num_workers > 0 else None
+        ),
+    )
+    print(
+        f"DataLoader: num_workers={args.dataloader_num_workers} "
+        f"prefetch_factor={args.dataloader_prefetch_factor if args.dataloader_num_workers > 0 else 'n/a'} "
+        f"persistent={args.dataloader_persistent_workers and args.dataloader_num_workers > 0} "
+        f"pin_memory=True"
     )
     if args.max_steps is not None:
         sft_kwargs["max_steps"] = args.max_steps
