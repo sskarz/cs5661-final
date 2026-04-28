@@ -320,10 +320,14 @@ def process_shard(args_tuple):
 
     img_dir = out_dir / "images"
     img_dir.mkdir(parents=True, exist_ok=True)
-    # Open per-split append handles for THIS worker; merge after.
+    # Open per-split APPEND handles for THIS worker; merge after.
+    # Append mode is critical — workers handle multiple shards each, and
+    # mode "w" would truncate on every reopen (lost ~80% of rows the first
+    # time this ran). main() pre-cleans stale `_part_*` so first-write state
+    # is correct without truncation.
     pid = os.getpid()
     handles = {
-        sp: open(out_dir / f"_part_{sp}_pid{pid}.jsonl", "w")
+        sp: open(out_dir / f"_part_{sp}_pid{pid}.jsonl", "a")
         for sp in ("train", "val", "test")
     }
     n_in, n_out, n_skip_no_split, n_bad_action = 0, 0, 0, 0
@@ -424,6 +428,18 @@ def parse_shard_spec(spec: str, total: int = 20) -> list[int]:
     return sorted(s for s in out if 0 <= s < total)
 
 
+def _process_shard_safe(args_tuple):
+    """Wrap process_shard so a per-shard exception returns a dict instead of
+    propagating into pool.imap and aborting the whole run."""
+    shard_path = args_tuple[0]
+    try:
+        return process_shard(args_tuple)
+    except Exception as e:
+        return {"shard": shard_path.name, "episodes_in": 0, "rows_out": 0,
+                "skipped_no_split": 0, "skipped_bad_action": 0,
+                "error": f"{type(e).__name__}: {e}"}
+
+
 def merge_partials(out_dir: Path) -> dict[str, int]:
     """Merge per-worker partials into one file per split.
 
@@ -497,10 +513,28 @@ def main():
 
     work = [(p, args.output_dir, ep_to_split, save_pngs) for p in shard_paths]
     if args.workers <= 1:
-        results = [process_shard(w) for w in work]
+        results = []
+        for w in work:
+            try:
+                results.append(process_shard(w))
+            except Exception as e:
+                print(f"[shard-fail] {w[0].name}: {type(e).__name__}: {e}", file=sys.stderr)
+                results.append({"shard": w[0].name, "episodes_in": 0, "rows_out": 0,
+                                "skipped_no_split": 0, "skipped_bad_action": 0, "error": str(e)})
     else:
+        # imap_unordered + per-shard try/except so one bad shard doesn't abort
+        # the whole pool. The original pool.map raises on first failure and
+        # discards all the partials from healthy workers — bad outcome.
+        results = []
         with mp.Pool(args.workers) as pool:
-            results = pool.map(process_shard, work)
+            for shard_result in pool.imap_unordered(_process_shard_safe, work):
+                results.append(shard_result)
+                if "error" in shard_result:
+                    print(f"[shard-fail] {shard_result['shard']}: {shard_result['error']}",
+                          file=sys.stderr)
+                else:
+                    print(f"[shard-ok] {shard_result['shard']}: "
+                          f"episodes={shard_result['episodes_in']} rows={shard_result['rows_out']}")
 
     total_out = sum(r["rows_out"] for r in results)
     total_in = sum(r["episodes_in"] for r in results)

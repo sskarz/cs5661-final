@@ -65,11 +65,17 @@ def download_shard(shard_idx: int, output_dir: Path, force: bool = False) -> boo
     if dest.exists() and not force:
         actual = dest.stat().st_size
         if actual == expected:
-            print(f"[shard {shard_idx:02d}] OK ({actual / 1e9:.2f} GB, complete)")
-            return True
-        print(f"[shard {shard_idx:02d}] partial {actual}/{expected} — resuming")
-        # Resume via Range
-        start = actual
+            # Verify gzip integrity — Content-Length match isn't enough.
+            if verify_gzip(dest):
+                print(f"[shard {shard_idx:02d}] OK ({actual / 1e9:.2f} GB, verified)")
+                return True
+            print(f"[shard {shard_idx:02d}] size matches but gzip corrupt — re-downloading",
+                  file=sys.stderr)
+            dest.unlink()
+            start = 0
+        else:
+            print(f"[shard {shard_idx:02d}] partial {actual}/{expected} — resuming")
+            start = actual
     else:
         start = 0
 
@@ -104,8 +110,27 @@ def download_shard(shard_idx: int, output_dir: Path, force: bool = False) -> boo
             file=sys.stderr,
         )
         return False
+    # Integrity check: gunzip-stream-walk catches corruption-on-resume that
+    # size match alone misses (multi-stream gzip can have inner corruption).
+    if not verify_gzip(dest):
+        print(f"[shard {shard_idx:02d}] gzip integrity FAILED — deleting", file=sys.stderr)
+        dest.unlink()
+        return False
     print(f"[shard {shard_idx:02d}] DONE ({final / 1e9:.2f} GB)")
     return True
+
+
+def verify_gzip(path: Path) -> bool:
+    """Walk the entire gzip stream; raises BadGzipFile on multi-stream corruption."""
+    import gzip
+    try:
+        with gzip.open(path, "rb") as g:
+            while g.read(1 << 22):
+                pass
+        return True
+    except Exception as e:
+        print(f"[verify] {path.name}: {type(e).__name__}: {e}", file=sys.stderr)
+        return False
 
 
 def download_splits(output_dir: Path) -> bool:
