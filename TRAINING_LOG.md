@@ -1501,3 +1501,177 @@ All scripts re-import cleanly post-fix. Synthetic tests verify: canonical filter
 **Gated**:
 - AndroidWorld eval — only meaningful with a model that clears AndroidControl baseline.
 - Step 3 DPO/RFT — gated on a winning SFT recipe.
+
+## 27. Run H eval sweep — projector unlock confirmed, but coord cliff persists
+
+12-checkpoint eval sweep on Run H (the projector-unlocked retrain of Run E's hyperparameters). 200 samples / seed 3407 / HF-mirror test split:
+
+| step | full_match | step | full_match |
+|---|---|---|---|
+| 500 | 0.260 | 3500 | 0.230 |
+| **1000** | **0.275 (peak)** | 4000 | 0.210 |
+| 1500 | 0.255 | 4500 | 0.220 |
+| 2000 | 0.240 | 5000 | 0.225 |
+| 2500 | 0.245 | 5500 | 0.220 |
+| 3000 | 0.215 | 5966 | 0.215 |
+
+**Read**:
+- Run H best (0.275) > Run E best (0.210) by **+0.065 (+31% relative)**. Projector unfreeze is real.
+- Run H best (0.275) < HF baseline (0.288). Same overfit-then-cliff shape as Runs B–G.
+- Per-action-type at peak (ckpt-1000): tap 0.280, scroll 0.312, type 0.467, navigate_back 0.222, open_app 0.100. type/scroll best, open_app degraded.
+- The projector unfreeze was load-bearing for ceiling but didn't change the peak shape. Coord-prior collapse remains the underlying cause.
+
+## 28. Path X (SoM) and Path W (a11y-native) baselines
+
+Both paths now resolved on the GCS-canonical test split (1,747 rows post-prep, 200 sampled).
+
+### Path X — SoM render with GT bboxes, zero-shot
+
+| metric | value |
+|---|---|
+| full_match | **0.130** |
+| parse_rate | 0.995 |
+| tap_reachability | 0.972 |
+| tap accuracy | 0.009 |
+| navigate_back | 0.636 |
+| type | 0.632 |
+
+**Diagnosis**: 97% of GT taps land inside a rendered mark (data is fine, marks are placed correctly). The model picks them with ~0% accuracy (1 of 106 tap rows). Non-tap actions that don't need marks score normally. This is the documented "small VLMs cannot attend to numbered marks zero-shot" failure mode (Yang et al. SoM showed huge gains on GPT-4V, but smaller VLMs need SFT to learn the convention). Path X is structurally limited without training.
+
+### Path W — element_id with text legend, zero-shot
+
+| metric | value |
+|---|---|
+| full_match | **0.515** |
+| parse_rate | 1.000 |
+| tap_oracle_reachability | 0.858 (perfect-model ceiling) |
+| n_tap_rows | 120 |
+
+Per-action-type:
+
+| action | n | accuracy |
+|---|---|---|
+| navigate_back | 9 | **1.000** |
+| tap | 120 | **0.683** |
+| type | 16 | 0.625 |
+| scroll | 27 | 0.074 |
+| wait | 16 | 0.000 |
+| open_app | 12 | 0.000 |
+
+**Read**: zero-shot Path W beats coord baseline (0.288) by **+0.227** and beats Run H best (0.275) by **+0.240**. Tap-action grounding is the main win — when the model has a textual legend instead of having to predict (x, y) digits, it picks the right element 68.3% of the time with no training. The remaining errors are TASK-knowledge failures (scroll-direction picking, open_app needing world knowledge of app names) rather than grounding failures.
+
+This is the cleanest evidence yet that **the cliff in 8 prior LoRA runs was the task framing, not the model capability**. Coord regression on text-encoded floats provides too coarse a per-image signal; the model converges to corpus-mode coordinates. Path W replaces the coord-digit landscape with discrete element selection, which has no analogous shortcut.
+
+| ranking | what | full_match |
+|---|---|---|
+| 1 | Path W zero-shot | **0.515** |
+| 2 | HF coord baseline | 0.288 |
+| 3 | Run H best (LoRA, projector unlocked, coord regression) | 0.275 |
+| 4 | Path X (SoM) zero-shot | 0.130 |
+
+## 29. Run I — Path W 1-epoch SFT (in flight)
+
+Same hyperparameters as Run H except the coord-regression-specific flags are dropped (they are nonsensical for Path W's element_id targets). The clean A/B test of "does removing coord regression remove the cliff?"
+
+```
+.venv/bin/python -u scripts/train_sft.py \
+    --data-dir data/androidcontrol_a11y_native \
+    --output-dir outputs/gemma4-e2b-pathW-lora-runI \
+    --epochs 1.0 \
+    --lora-r 16 --lora-alpha 32 --lr 5e-5 \
+    --save-steps 300 --save-total-limit 30
+```
+
+**Differences from Run H**:
+- `--data-dir` switched to `data/androidcontrol_a11y_native` (GCS canonical splits, element_id targets).
+- `--no-response-only` REMOVED. Path W has a ~600-token legend in the user prompt; full-seq loss would waste capacity learning to "predict" the legend back. Default response-only loss focuses gradient on the ~12-token JSON answer.
+- `--coord-loss-weight 1.0` REMOVED. There are no coordinate digits in Path W targets; the coord-aware collator is gracefully short-circuited at weight=0.0.
+- `--epochs 1.0` (vs Run H 0.3) for full-data exposure. ~9,131 steps total at effective batch 8.
+- `--save-steps 300` for ~30 checkpoints, all retained (213 MB × 30 ≈ 6.4 GB on 788 GB free).
+
+**Pre-launch verification** (smoke test against synthetic data confirmed all contracts):
+- Filter+sort identical between Path X (SoM render) and Path W (legend prep).
+- C3 clickable-first containment picks the Button, not the inner Label, when GT lies in both.
+- B1' contract (only `parse_a11y_data.canonicalize_action` produces action strings) holds — no `long_press` leakage.
+- `image_w`/`image_h` carried on every row (B4 contract for px-filter reproducibility).
+- 9-test smoke harness at `/tmp/smoke_paths.py` passes all cases.
+
+**Pre-launch lora-audit** (Run I startup output):
+- `embed_vision (projector)` trainable: **1,179,648 params** (the bug fix that took 8 runs to find).
+- `embed_audio` projector also picked up via `modules_to_save` (~2.4M, harmless side effect).
+- Total trainable: 33.4M of 5.16B (0.65%).
+
+**Wall clock**: ~5h at observed 2.0 s/step (slightly slower than Run H's 1.51 s/step due to longer Path W prompts). Comfortable overnight window.
+
+**Post-training automation** (queued behind training PID exit):
+- `scripts/runI_overnight_pipeline.sh`: waits for training to exit, then runs `eval_a11y_native.py` on every checkpoint (200 samples / seed 3407 / save predictions), then runs `runI_postanalysis.py` to produce a confusion matrix, near-miss analysis, and per-action delta vs Path W baseline. Writes `WAKE_UP_SUMMARY.md` and appends §30 to this log.
+
+## 30. Run I — Path W (a11y-native) 1-epoch SFT, results
+
+Best checkpoint: **`ckpt-1500` at full_match = 0.595** (Path W baseline 0.515, Run H best 0.275, coord baseline 0.288).
+
+### Per-checkpoint sweep
+
+| step | full_match | parse | oracle | tap acc | scroll | type | open_app | nav_back |
+|---|---|---|---|---|---|---|---|---|
+| **baseline** | **0.515** | 1.000 | 0.858 | 0.683 | 0.074 | 0.625 | 0.000 | 1.000 |
+| 600 | 0.555 | 0.945 | 0.858 | 0.683 | 0.222 | 0.750 | 0.167 | 1.000 |
+| 900 | 0.570 | 0.955 | 0.858 | 0.692 | 0.296 | 0.750 | 0.167 | 1.000 |
+| 1200 | 0.540 | 0.955 | 0.858 | 0.700 | 0.111 | 0.750 | 0.000 | 1.000 |
+| **1500** | **0.595** | 0.995 | 0.858 | 0.700 | 0.444 | 0.750 | 0.167 | 1.000 |
+| 1800 | 0.550 | 0.975 | 0.858 | 0.700 | 0.185 | 0.688 | 0.083 | 1.000 |
+| 2100 | 0.510 | 1.000 | 0.858 | 0.675 | 0.037 | 0.625 | 0.083 | 1.000 |
+| 2400 | 0.505 | 1.000 | 0.858 | 0.675 | 0.037 | 0.625 | 0.000 | 1.000 |
+| 2700 | 0.530 | 0.995 | 0.858 | 0.683 | 0.185 | 0.625 | 0.000 | 1.000 |
+| 3000 | 0.535 | 1.000 | 0.858 | 0.692 | 0.185 | 0.625 | 0.000 | 1.000 |
+| 3300 | 0.520 | 0.995 | 0.858 | 0.700 | 0.037 | 0.625 | 0.000 | 1.000 |
+| 3600 | 0.510 | 1.000 | 0.858 | 0.667 | 0.037 | 0.688 | 0.000 | 1.000 |
+| 3900 | 0.480 | 0.995 | 0.858 | 0.633 | 0.000 | 0.625 | 0.000 | 1.000 |
+| 4200 | 0.505 | 1.000 | 0.858 | 0.667 | 0.000 | 0.625 | 0.000 | 1.000 |
+| 4500 | 0.500 | 0.995 | 0.858 | 0.658 | 0.037 | 0.625 | 0.000 | 1.000 |
+| 4800 | 0.465 | 1.000 | 0.858 | 0.608 | 0.000 | 0.625 | 0.083 | 1.000 |
+| 5100 | 0.480 | 0.995 | 0.858 | 0.633 | 0.000 | 0.562 | 0.083 | 1.000 |
+| 5400 | 0.490 | 1.000 | 0.858 | 0.642 | 0.000 | 0.562 | 0.083 | 1.000 |
+| 5700 | 0.495 | 1.000 | 0.858 | 0.650 | 0.000 | 0.625 | 0.000 | 1.000 |
+| 6000 | 0.485 | 1.000 | 0.858 | 0.633 | 0.000 | 0.688 | 0.000 | 1.000 |
+| 6300 | 0.500 | 1.000 | 0.858 | 0.667 | 0.000 | 0.625 | 0.000 | 1.000 |
+| 6600 | 0.510 | 0.995 | 0.858 | 0.675 | 0.000 | 0.688 | 0.000 | 1.000 |
+| 6900 | 0.495 | 0.990 | 0.858 | 0.658 | 0.000 | 0.688 | 0.000 | 1.000 |
+| 7200 | 0.505 | 1.000 | 0.858 | 0.650 | 0.000 | 0.688 | 0.083 | 1.000 |
+| 7500 | 0.505 | 1.000 | 0.858 | 0.658 | 0.000 | 0.688 | 0.000 | 1.000 |
+| 7800 | 0.505 | 1.000 | 0.858 | 0.658 | 0.000 | 0.688 | 0.000 | 1.000 |
+| 8100 | 0.510 | 1.000 | 0.858 | 0.667 | 0.000 | 0.688 | 0.000 | 1.000 |
+| 8400 | 0.505 | 1.000 | 0.858 | 0.658 | 0.000 | 0.688 | 0.000 | 1.000 |
+| 8700 | 0.495 | 1.000 | 0.858 | 0.650 | 0.000 | 0.625 | 0.000 | 1.000 |
+| 9000 | 0.500 | 1.000 | 0.858 | 0.658 | 0.000 | 0.625 | 0.000 | 1.000 |
+| 9132 | 0.500 | 1.000 | 0.858 | 0.650 | 0.000 | 0.688 | 0.000 | 1.000 |
+
+### Best-checkpoint failure analysis
+
+**Best checkpoint: ckpt-1500, full_match = 0.595**
+
+Confusion matrix (rows = GT action, cols = predicted):
+
+| GT \ pred | <parse_fail> | action_not_found | launch_app | long_press | navigate_back | open_app | scroll | scroll down | scroll_up | tap | type |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **navigate_back** | 0 | 0 | 0 | 0 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **open_app** | 0 | 1 | 1 | 0 | 1 | 2 | 0 | 0 | 0 | 7 | 0 |
+| **scroll** | 0 | 0 | 0 | 0 | 0 | 0 | 19 | 4 | 3 | 1 | 0 |
+| **tap** | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 118 | 1 |
+| **type** | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 15 |
+| **wait** | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 13 | 2 |
+
+Of wrong tap predictions: **0/36 (0.0%) were 'near misses'** (picked a different element whose bbox center is within 0.14 of GT). The rest (36) were structurally wrong picks.
+
+Per-action-type lift over zero-shot baseline (best ckpt):
+
+| action | n | baseline acc | best ckpt acc | Δ |
+|---|---|---|---|---|
+| wait | 16 | 0.000 | 0.000 | ↑ +0.000 |
+| tap | 120 | 0.683 | 0.700 | ↑ +0.017 |
+| scroll | 27 | 0.074 | 0.444 | ↑ +0.370 |
+| type | 16 | 0.625 | 0.750 | ↑ +0.125 |
+| open_app | 12 | 0.000 | 0.167 | ↑ +0.167 |
+| navigate_back | 9 | 1.000 | 1.000 | ↑ +0.000 |
+
+

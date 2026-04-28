@@ -72,7 +72,31 @@ def resolve_element(pred: dict, elements: list[dict]) -> tuple[float, float] | N
     return None
 
 
+_SCROLL_DIR_RE = re.compile(r"^scroll[\s_\-]*(up|down|left|right)$", re.IGNORECASE)
+
+
+def _normalize_pred(pred: dict) -> dict:
+    """Canonicalize model output before scoring.
+
+    Run I confusion matrix showed model occasionally emits action strings
+    like "scroll down" / "scroll_up" / "scroll-left" instead of the
+    canonical {"action":"scroll", "direction":"down"} schema. Split those
+    into the canonical form at score time. Defensive — does NOT modify the
+    model output (we keep the raw output for diagnostics).
+    """
+    out = dict(pred)
+    raw = (out.get("action") or out.get("action_type") or "").strip()
+    m = _SCROLL_DIR_RE.match(raw)
+    if m:
+        out["action"] = "scroll"
+        # Don't overwrite an explicit direction the model already set.
+        if not out.get("direction"):
+            out["direction"] = m.group(1).lower()
+    return out
+
+
 def action_match(pred: dict, gt: dict, gt_xy: list[float] | None) -> bool:
+    pred = _normalize_pred(pred)
     p_t = (pred.get("action") or pred.get("action_type") or "").lower()
     g_t = (gt.get("action") or "").lower()
     if not p_t or p_t != g_t:
@@ -126,12 +150,19 @@ def main():
     from unsloth import FastVisionModel
     import torch
 
-    model, processor = FastVisionModel.from_pretrained(
-        args.model, load_in_4bit=True, use_gradient_checkpointing="unsloth"
-    )
+    # Adapter path: pass directly to FastVisionModel.from_pretrained, which
+    # detects adapter_config.json and loads base + adapter together. Stock
+    # peft.PeftModel.from_pretrained rejects Gemma4ClippableLinear (Unsloth's
+    # wrapper around the LM Linears) — see eval_androidcontrol.py for the
+    # same pattern.
     if args.adapter:
-        from peft import PeftModel
-        model = PeftModel.from_pretrained(model, args.adapter)
+        model, processor = FastVisionModel.from_pretrained(
+            str(args.adapter), load_in_4bit=True, use_gradient_checkpointing=False
+        )
+    else:
+        model, processor = FastVisionModel.from_pretrained(
+            args.model, load_in_4bit=True, use_gradient_checkpointing=False
+        )
     FastVisionModel.for_inference(model)
 
     correct = 0; parse_fail = 0

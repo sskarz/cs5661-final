@@ -145,12 +145,16 @@ def main():
     from unsloth import FastVisionModel
     import torch
 
-    model, processor = FastVisionModel.from_pretrained(
-        args.model, load_in_4bit=True, use_gradient_checkpointing="unsloth"
-    )
+    # Pass adapter dir directly to FastVisionModel — stock peft.PeftModel
+    # rejects Unsloth's Gemma4ClippableLinear wrapper. Mirrors eval_androidcontrol.
     if args.adapter:
-        from peft import PeftModel
-        model = PeftModel.from_pretrained(model, args.adapter)
+        model, processor = FastVisionModel.from_pretrained(
+            str(args.adapter), load_in_4bit=True, use_gradient_checkpointing=False
+        )
+    else:
+        model, processor = FastVisionModel.from_pretrained(
+            args.model, load_in_4bit=True, use_gradient_checkpointing=False
+        )
     FastVisionModel.for_inference(model)
 
     correct = 0
