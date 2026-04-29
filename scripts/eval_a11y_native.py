@@ -57,6 +57,27 @@ def _coerce_action_json(text: str) -> dict | None:
     return None
 
 
+def _flatten_v2(action: dict) -> dict:
+    """v2 -> v1 schema. Idempotent on v1 input.
+
+    v2: {"action_type": "tap", "action_args": {"element_id": 7}}
+    v1: {"action": "tap", "element_id": 7}
+
+    Run K (CoCo-Agent CAP) writes v2; Run I/J use v1. The rest of this
+    eval (action_match, resolve_element, scoring) speaks v1, so we flatten
+    at every ingest point. Auto-detected — no --target-format flag needed.
+    """
+    if not isinstance(action, dict) or not action:
+        return action
+    if "action_type" in action and "action_args" in action:
+        out = {"action": action["action_type"]}
+        args = action.get("action_args") or {}
+        if isinstance(args, dict):
+            out.update(args)
+        return out
+    return action
+
+
 def resolve_element(pred: dict, elements: list[dict]) -> tuple[float, float] | None:
     eid = pred.get("element_id")
     if eid is None:
@@ -177,7 +198,7 @@ def main():
     t0 = time.time()
 
     for i, row in enumerate(rows):
-        gt = json.loads(row["messages"][1]["content"][0]["text"])
+        gt = _flatten_v2(json.loads(row["messages"][1]["content"][0]["text"]))
         # gt may already be in element_id form (from prepare_a11y_native);
         # we still need the original action_type and (for scoring) gt_xy.
         gt_action_type = (gt.get("action") or "").lower()
@@ -201,7 +222,7 @@ def main():
         gen = processor.decode(
             out[0, inputs["input_ids"].shape[-1]:], skip_special_tokens=True
         )
-        pred = _coerce_action_json(gen) or {}
+        pred = _flatten_v2(_coerce_action_json(gen) or {})
         if not pred:
             parse_fail += 1
 

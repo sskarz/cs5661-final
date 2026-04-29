@@ -28,6 +28,19 @@ from pathlib import Path
 _SCROLL_DIR_RE = re.compile(r"^scroll[\s_\-]*(up|down|left|right)$", re.IGNORECASE)
 
 
+def _flatten_v2(action: dict) -> dict:
+    """v2 -> v1 schema; idempotent on v1. See eval_a11y_native._flatten_v2."""
+    if not isinstance(action, dict) or not action:
+        return action
+    if "action_type" in action and "action_args" in action:
+        out = {"action": action["action_type"]}
+        args = action.get("action_args") or {}
+        if isinstance(args, dict):
+            out.update(args)
+        return out
+    return action
+
+
 def _normalize(pred: dict) -> dict:
     out = dict(pred)
     raw = (out.get("action") or out.get("action_type") or "").strip()
@@ -74,8 +87,8 @@ def rescore_file(path: Path) -> dict:
     confusion_element: dict[str, dict] = {}
 
     for p in preds:
-        gt = p.get("gt") or {}
-        pred = p.get("pred") or {}
+        gt = _flatten_v2(p.get("gt") or {})
+        pred = _flatten_v2(p.get("pred") or {})
         gt_t = (gt.get("action") or "").lower()
         ok_e = element_match(pred, gt)
         ok_element += int(ok_e)

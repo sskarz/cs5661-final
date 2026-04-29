@@ -136,6 +136,20 @@ def main():
                 sys.exit(f"[native-eval-batched] FATAL: cannot bind 1 image per text "
                          f"(pixel_values batch dim {pv.shape[0]} != {B})")
 
+        # RoPE-padding fix (§35.6): with left-padding, content tokens land at
+        # different absolute sequence indices in batch=1 vs batch=8. RoPE rotates
+        # Q/K vectors by absolute position, so attention scores diverge and
+        # greedy decisions flip on borderline tokens. The smoke in §35.6 saw 7/200
+        # mismatches due to this. Fix: pass explicit `position_ids` derived from
+        # `attention_mask` so content tokens get the same absolute positions
+        # whether they were left-padded or not. Pad positions get a placeholder
+        # value (1) — they're masked out of attention so the value doesn't
+        # affect outputs.
+        attn_mask = inputs["attention_mask"]
+        position_ids = attn_mask.long().cumsum(-1) - 1
+        position_ids.masked_fill_(attn_mask == 0, 1)
+        inputs["position_ids"] = position_ids
+
         with torch.inference_mode():
             out = model.generate(
                 **inputs,

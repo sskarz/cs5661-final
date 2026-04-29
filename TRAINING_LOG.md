@@ -2102,3 +2102,70 @@ Drop `wait`/`open_app` from the metric. Number goes up on paper; product is no b
 **Try Option 1 first.** Zero training cost, runs against the existing best adapter, can be tested in under an hour. If the taxonomy prompt lifts open_app/wait into the 0.10–0.20 range without hurting other classes, that's a free 3–5pp on the headline element-acc with no compute. If it stalls or breaks something, we have learned that the bottleneck is genuinely below the input layer (model can't *see* the difference) and Option 2 becomes the next move.
 
 Option 2 is the natural follow-up if Option 1 confirms the input is the bottleneck — cleaner and more defensible than cui because hard-negative oversampling doesn't change the loss function, only the data the loss is computed on.
+
+## 39. Run K plan — two-stage decoding (CoCo-Agent CAP-style)
+
+_Appended manually 2026-04-28._
+
+### Why not focal loss
+
+After §38's "what to try next" survey, the user asked for literature-backed proof that focal loss would help before spending GPU time. A targeted research scan turned up active evidence AGAINST focal loss in the closest-analogous setting (autoregressive long-tail token generation):
+
+- Raunak, Dalmia, Gupta & Metze, *"On Long-Tailed Phenomena in Neural Machine Translation,"* EMNLP Findings 2020 (arXiv:2010.04924). Studied focal loss for long-tail tokens in autoregressive generation. Found it WORSE than vanilla CE; proposed Anti-Focal loss (opposite sign) because focal "is more aggressive than cross-entropy in pushing low-confidence predictions to higher confidence values" and damages high-frequency tokens.
+- Gu et al., *"Token-level Adaptive Training for Neural Machine Translation,"* EMNLP 2020 (arXiv:2010.04380). Same finding: vanilla focal "harms high-frequency token prediction by simply highlighting the loss of low-frequency ones."
+
+This matches our cui experience exactly — `type` (a moderate-frequency class) took the largest hit (-7.9pp) under cui rebalancing. Focal would likely repeat the same failure mode via a different mechanism. **Decision: do not run focal loss.** No published evidence supports it for our setting; two converging negative results from the closest analog literature explicitly argue against it.
+
+### What the literature DOES support: two-stage / hierarchical decoding
+
+Strongest precedent: Ma, Zhang & Zhao, *"CoCo-Agent: A Comprehensive Cognitive MLLM Agent for Smartphone GUI Automation,"* ACL Findings 2024 (arXiv:2402.11941). Their Conditional Action Prediction (CAP) decomposes the JSON output to emit `action_type` first, then conditionally decodes args. Single autoregressive pass — no architecture surgery. Same dataset family as ours (AITW is the AndroidControl sibling; their reported imbalance "Dual point action accounts for 69.26% - 86.09%... [rare actions] consistently account for low proportions" almost exactly matches our distribution). Removing CAP drops AITW-General from 69.92% → 64.29%, a 5.63pp ablation gain (bundled with their CEP component, so isolated CAP gain is somewhere between 2-5pp).
+
+Honest caveat: CoCo-Agent's ablation doesn't perfectly isolate CAP from CEP, so the 5.63pp lift is an upper bound on what CAP alone delivers. Even half that (~2.8pp) on our 0.4930 baseline → 0.521 element-acc would beat anything else in our pipeline.
+
+### Run K specification
+
+**Single-variable change vs Run I**: the target JSON serialization. Everything else identical (lr=5e-5, LoRA r=16/α=32, 1.0 epoch, save-steps=300, save-total-limit=30, no cui, no coord loss, no oversampling).
+
+**Old target format** (Run I, Run J):
+```json
+{"action": "tap", "element_id": 7}
+{"action": "open_app", "app_name": "Slack"}
+{"action": "scroll", "direction": "up"}
+{"action": "type", "text": "hello"}
+{"action": "navigate_back"}
+{"action": "wait"}
+```
+
+**New target format** (Run K):
+```json
+{"action_type": "tap", "action_args": {"element_id": 7}}
+{"action_type": "open_app", "action_args": {"app_name": "Slack"}}
+{"action_type": "scroll", "action_args": {"direction": "up"}}
+{"action_type": "type", "action_args": {"text": "hello"}}
+{"action_type": "navigate_back", "action_args": {}}
+{"action_type": "wait", "action_args": {}}
+```
+
+The CAP mechanism: when generating the value of `action_type`, the model is choosing among a small fixed vocabulary (6 entries). The training signal at that single position is sharp because it's the first content token after `"action_type": "`. When generating args, the model conditions on its own committed type, so args become type-conditional instead of type-confused.
+
+**Implementation path** (concrete files):
+
+1. **Data prep**: write `scripts/prepare_a11y_native_v2.py` (or pass `--target-format v2` to existing prep). Reads original sources, writes `data/androidcontrol_a11y_native_v2/{train,val,test}.jsonl` with the new target format. Keeps the old data dir intact for Run I/J reproducibility. Validate: 9132 train + 686 val + 8217 test rows, every assistant message parseable as the new schema.
+2. **Eval**: extend `scripts/eval_a11y_native.py` with a `--target-format v2` flag that branches `_coerce_action_json` and `action_match` to handle the nested `action_args` schema. Single-file change; preserves the v1 path for Run I/J re-eval.
+3. **Element-rescore**: extend `scripts/rescore_native_element.py` similarly so element-accuracy is computed on either schema.
+4. **Training**: identical command to Run I except `--data-dir data/androidcontrol_a11y_native_v2 --output-dir outputs/gemma4-e2b-pathW-lora-runK`. No new flags. Inherits the §35.5 dataloader speedup automatically.
+5. **Chain**: clone `scripts/run_j_resume_sequential.sh` → `scripts/run_k_chain.sh` with Run K paths and the v2 eval flag. Same val sweep + best-ckpt full-test + auto-append §40/§41 to TRAINING_LOG.md + write `FINAL_SUMMARY_runK.md`.
+
+**Pre-flight smoke test** (~10 min, before launching the 6h training): build the v2 dataset, render 3 sample rows, eyeball the assistant text, run a 20-step train smoke to confirm no tokenizer pathology with the new format. Catches dumb errors cheaply.
+
+**Expected outcome**: if CAP's mechanism transfers, Run K's best-ckpt full-test element-acc lands in [0.51, 0.55]. If it lands ≤ Run I's 0.493, that's a sharper paper conclusion: "two well-supported imbalance-mitigation strategies (cui rebalancing AND two-stage decoding) both failed on AndroidControl, suggesting the bottleneck is below the loss/output-format level."
+
+### Cost estimate
+
+- Smoke test: 10 min
+- Data prep + eval extensions: 1-2 h coding
+- Training: ~3.5 h (with dataloader workers active vs Run J's 5.5h without)
+- Val sweep on 30 ckpts: ~3.5 h sequential
+- Best-ckpt full-test: ~75 min
+- Bookkeeping: ~5 min
+- **Total: ~9 h GPU + 2 h coding** — same wall-clock as Run J despite the additional codebase work, because Run K inherits the dataloader speedup that Run J missed.
