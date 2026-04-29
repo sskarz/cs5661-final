@@ -2555,3 +2555,42 @@ A separate verification pass against the upstream README confirmed:
 - Same task subset (full 116 if feasible, else fix the list before either run).
 - Same `n_task_combinations` and same random seed.
 - Headline metric: success rate. Secondary: Pass@k for emulator-flake robustness, steps-to-success for efficiency.
+
+## 48. AndroidWorld smoke verified + full-sweep launched
+
+_Appended 2026-04-29._
+
+### Smoke (single task: `ContactsAddContact`)
+
+Both agents ran end-to-end with no exceptions, no exec errors, valid model output, valid action conversion. Plumbing is green.
+
+| agent | steps | wall time | success | model output schema | action conversion |
+|---|---|---|---|---|---|
+| `gemma4_baseline` | 12 | 68.6 s | 0.0 | v2 (clean) | tap→click(414,1970) + 11×input_text |
+| `gemma4_lora` (Run L ckpt-2100) | 12 | 71.1 s | 0.0 | v2 (one fenced ```json``` fallback handled, rest clean) | 12×input_text |
+
+The single-task 0/0 success is **not** comparative signal — both agents fell into a "type the goal text" loop because the v3 prompt format trains for one-shot click-or-type decisions, not multi-step recovery. AndroidWorld's full-sweep success rate (across 116 tasks of varying length) is the meaningful comparison.
+
+Notes from the smoke:
+- Emulator first-run `--perform_emulator_setup` had one soft warning (`Failed to automatically setup app contacts: Target text "Don't allow" not found`) — the contacts auto-setup didn't click through one screen but the run continued. AndroidWorld README treats this as expected on some images.
+- Unsloth confirmed the LoRA mounts: `Allowing gradients for base_model.model.model.embed_vision.embedding_projection / embed_audio.embedding_projection`.
+- GPU returned to 311 MiB after each run (no leak).
+- Per-step latency ~5.7-5.9 s (model inference + a11y tree + screenshot).
+
+### Full-sweep launch
+
+Started `scripts/run_androidworld_sweep.sh` in background — sequential baseline→LoRA on the same emulator. Logs:
+- Driver: `outputs/androidworld_logs/sweep_driver.log`
+- Per-sweep status: `outputs/androidworld_logs/sweep.log`
+- Baseline run: `outputs/androidworld_logs/baseline_full.log` → `~/android_world/runs/baseline_full/`
+- LoRA run: `outputs/androidworld_logs/lora_full.log` → `~/android_world/runs/lora_full/`
+
+ETA estimate (from smoke timing × 116 tasks × ~12-15 step avg):
+- ~2.25-2.85 h per agent
+- ~5 h total wall time for both
+
+Sequential chosen over parallel because AndroidWorld assumes one agent per emulator; parallel would require a second AVD and would induce GPU contention that distorts per-task latency. Cleaner to do sequential and report identical-environment numbers.
+
+### Next: §49 will land sweep results
+
+To be auto-appended when the sweep finishes — headline success rate per agent, per-difficulty + per-tag breakdown (`easy/medium/hard`, `data_entry/parameterized/multi_app`...), and a delta column showing where the LoRA helped/hurt.
