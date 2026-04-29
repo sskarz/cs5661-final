@@ -1891,3 +1891,214 @@ The new SFTConfig kwargs are gated so `--dataloader-num-workers 0` still produce
 2. Drop `use_gradient_checkpointing="unsloth"`. ~25-30% step-time win, but loses the ≈2× memory savings — current ~4.7 GB VRAM headroom is tight, would need a smoke run to confirm no OOM at peak sequence length.
 3. `--batch-size 8 --grad-accum 1` (same effective batch=8). Same memory caveat as (2).
 
+## 35.6. Eval-speedup investigation — batched generation FAILS prediction parity
+
+_Appended manually 2026-04-28._
+
+**Motivation**: Sequential per-row eval (`scripts/eval_a11y_native.py`) does ~64 autoregressive forward passes per row at batch=1; on the val sweep across 30 Run J ckpts × 686 val rows, the GPU is idle most of every cycle. Batching 8 rows in parallel should give ~5–8× wall-clock speedup with the same forward-pass count, by amortizing kernel-launch + KV-cache overhead.
+
+**Implementation** (`scripts/eval_a11y_native_batched.py`): drop-in replacement for the sequential eval. Imports the proven scoring helpers (`_coerce_action_json`, `action_match`, `_normalize_pred`, `resolve_element`) verbatim from `eval_a11y_native.py` so only the generation loop differs. Sets `processor.tokenizer.padding_side = "left"` so generation continues from the right of each padded prompt. After two reviewer passes, settled on a single `processor(text=batch_text_prompts, images=[[img] for img in batch_imgs], return_tensors="pt", padding=True)` call (the Gemma 4 processor's `make_nested_list_of_images` collapses a flat image list into a single multi-image sample, so the per-row binding has to be made explicit) plus a defensive `pixel_values.shape[0] == B` assertion, plus a first-batch boundary decode that prints the first 6 generated tokens to verify `prompt_len` slicing is correct.
+
+**Smoke test** (`scripts/smoke_test_batched_eval.sh`): run sequential and batched on Run I ckpt-7800, 200 rows, seed 3407, `--save-all-predictions`. Diff predictions row-by-row (resolver-injected `_resolved_x`/`_resolved_y` keys stripped). Tightened thresholds: `0 mismatches` → ACCEPT, `≤3` → MARGINAL, `>3` → FAIL.
+
+**Result: FAIL. 7 / 200 row-level mismatches despite identical aggregate metrics.**
+
+```
+Sequential: full_match=0.5750  parse=1.000  tap_oracle=0.858 (103/120)  wall=1.6 min
+Batched:    full_match=0.5750  parse=1.000  tap_oracle=0.858 (103/120)  wall=0.7 min
+Speedup:    2.47x
+Mismatched predictions: 7 / 200
+```
+
+Sample mismatches (first 5 of 7):
+
+| ep, step | sequential | batched |
+|---|---|---|
+| 2078, 2 | `tap` element_id=30 | `tap` element_id=11 |
+| 15802, 0 | `tap` element_id=1 | `launch_app` SmartNews |
+| 18302, 3 | `scroll up` + direction=up | `scroll_up` (no direction field) |
+| 19946, 6 | `scroll down` + direction=down | `scroll down` (no direction field) |
+| 8917, 0 | `tap` element_id=2 | `launch_app` element_id=1 |
+
+Two are surface-form scroll variations; three are different action-type or different element picks. Aggregate accuracy lines up by coincidence (≈ balanced flips: as many sequential-correct→batched-wrong as the reverse). On a different ckpt, the balance could shift and we would silently report inflated or deflated accuracy vs. what sequential would say.
+
+**Diagnosis**: most-likely cause is **left-padding interacting with Gemma 4's RoPE positions**. With left-padding, content tokens occupy DIFFERENT absolute position indices in batch=1 vs batch=8 (each padded prompt begins later in the position axis). RoPE is translation-equivariant for *relative* positions, but the model's attention scores are not bit-identical when query/key vectors are rotated by a different absolute amount — small score deltas accumulate across 60+ layers and flip greedy decisions on borderline tokens. SDPA fallback (Gemma 4 disables flash-attn for max-head-dim 512) widens the numerical gap further. Confounders considered and rejected:
+
+- The `pixel_values.shape[0] == B` probe came back clean (`(8, 2520, 768)`), so the per-row image binding is correct.
+- The first-batch gen-head probe printed `'{"action":"tap","element'` for both row 0 and row -1, so the `prompt_len` slice is correct (no off-by-one between text-padded prompt length and the actual prompt-end position after image-token expansion).
+- Greedy decoding (`do_sample=False`) is bit-deterministic at the kernel level for batch=1 — the only delta vs batched is the padding/position interaction.
+
+**Decision**: **defer batched eval. Use sequential for the Run J val sweep + full-test.** A 2.47× speedup is not worth a 3.5% silent prediction-drift on a metric where the chain's whole point is comparing to baseline at sub-percent significance. Batched is held for future investigation; the proper fix is one of:
+
+1. Pass explicit `position_ids` that skip pad positions (so content tokens get the same absolute positions in batch=1 and batch=8).
+2. Adopt right-padding + truncate generated output by per-row prompt length (loses the simple slice trick but eliminates the position-shift entirely).
+3. Run flash-attention with attention-mask-aware padding (blocked: Gemma 4's max attention head dim 512 exceeds FA2's 256-dim limit; would need an alternate kernel).
+4. Drop batching entirely in favour of a sharded sequential sweep across multiple GPUs — cleanest and avoids correctness risk, blocked on hardware availability.
+
+**Net cost of the detour**: ~10 min (smoke test wall-clock) + ~5 min (orphaned ckpt-1800 eval that had to be killed when the watcher was relaunched). Negligible vs. the 4 h sequential val sweep. The 4 already-completed val files (`runJ_val_ckpt600/900/1200/1500.json`) were preserved across the relaunch — `run_j_resume_sequential.sh` skips them on restart.
+
+**Code artifacts retained for the investigation**:
+
+- `scripts/eval_a11y_native_batched.py` — batched eval, syntactically clean, just incorrect under our specific (Gemma 4, SDPA, left-pad) regime.
+- `scripts/smoke_test_batched_eval.sh` — re-runnable harness; will be the verification gate when one of the four fixes above is applied.
+- `outputs/eval/runI_ckpt7800_smoke_seq.json` and `outputs/eval/runI_ckpt7800_smoke_batched.json` — the two prediction sets that disagreed; concrete starting point for diagnosing whether explicit `position_ids` recovers parity.
+
+
+## 36. Run J — clean cui ablation against Run I
+
+_Appended automatically by `run_j_resume_sequential.sh` at 2026-04-28 21:13 PDT._
+
+_Eval used **sequential** generation. The batched eval (`eval_a11y_native_batched.py`) was smoke-tested against the proven sequential reference on Run I ckpt-7800 (200 rows, seed 3407) and produced **7/200 row-level mismatches** despite identical aggregate metrics (`full_match=0.5750` both). Likely cause: left-padding interacts with Gemma 4's RoPE positions, producing small attention-score deltas that flip greedy decisions on borderline tokens. Sequential is correct; batched is held for future investigation (explicit `position_ids` or attention-mask-aware RoPE)._
+
+Run J = Run I recipe + class-balanced loss (`--action-weight-scheme cui`). Single-variable ablation: same lr (5e-5), same 1.0 epoch budget, same save-steps (300) as Run I; only the cui rebalancing differs. Goal: isolate whether class-balanced loss lifts `wait` (Run I 0.000) and `open_app` (Run I 0.167) off the floor without harming the strong classes (`tap`/`type`/`navigate_back`).
+
+Best Run J ckpt by val element-accuracy: `ckpt-6300`.
+
+### Run J val sweep (element-accuracy)
+
+```
+
+=== Element-accuracy rescore (Run J val) ===
+file                                                        n   radius  element  Δ
+runJ_val_ckpt600.json                                     686   0.5802   0.4694  -0.1108
+runJ_val_ckpt900.json                                     686   0.5612   0.4650  -0.0962
+runJ_val_ckpt1200.json                                    686   0.5700   0.4825  -0.0875
+runJ_val_ckpt1500.json                                    686   0.5671   0.4796  -0.0875
+runJ_val_ckpt1800.json                                    686   0.5452   0.4723  -0.0729
+runJ_val_ckpt2100.json                                    686   0.5685   0.4898  -0.0787
+runJ_val_ckpt2400.json                                    686   0.5671   0.4898  -0.0773
+runJ_val_ckpt2700.json                                    686   0.5437   0.4854  -0.0583
+runJ_val_ckpt3000.json                                    686   0.5569   0.4883  -0.0685
+runJ_val_ckpt3300.json                                    686   0.5714   0.5015  -0.0700
+runJ_val_ckpt3600.json                                    686   0.5583   0.4825  -0.0758
+runJ_val_ckpt3900.json                                    686   0.5627   0.4869  -0.0758
+runJ_val_ckpt4200.json                                    686   0.5554   0.4854  -0.0700
+runJ_val_ckpt4500.json                                    686   0.5656   0.4942  -0.0714
+runJ_val_ckpt4800.json                                    686   0.5627   0.5015  -0.0612
+runJ_val_ckpt5100.json                                    686   0.5685   0.5029  -0.0656
+runJ_val_ckpt5400.json                                    686   0.5714   0.5000  -0.0714
+runJ_val_ckpt5700.json                                    686   0.5700   0.5117  -0.0583
+runJ_val_ckpt6000.json                                    686   0.5700   0.5044  -0.0656
+runJ_val_ckpt6300.json                                    686   0.5714   0.5146  -0.0569
+runJ_val_ckpt6600.json                                    686   0.5612   0.5015  -0.0598
+runJ_val_ckpt6900.json                                    686   0.5700   0.5058  -0.0641
+runJ_val_ckpt7200.json                                    686   0.5758   0.5102  -0.0656
+runJ_val_ckpt7500.json                                    686   0.5671   0.5087  -0.0583
+runJ_val_ckpt7800.json                                    686   0.5656   0.5058  -0.0598
+runJ_val_ckpt8100.json                                    686   0.5612   0.5029  -0.0583
+runJ_val_ckpt8400.json                                    686   0.5656   0.5029  -0.0627
+runJ_val_ckpt8700.json                                    686   0.5671   0.5029  -0.0641
+runJ_val_ckpt9000.json                                    686   0.5685   0.5044  -0.0641
+runJ_val_ckpt9132.json                                    686   0.5656   0.5015  -0.0641
+```
+
+### Run J best-ckpt full-test
+
+```
+full_match (tap-radius): 0.5340
+parse_rate:              0.9933
+tap_oracle_reachability: 0.9040
+n_samples:               8217
+
+per-action-type:
+              wait: n= 559 acc=0.043
+               tap: n=4897 acc=0.686
+            scroll: n=1179 acc=0.214
+              type: n= 632 acc=0.666
+          open_app: n= 608 acc=0.002
+     navigate_back: n= 342 acc=0.962
+```
+
+    
+    === Element-accuracy rescore (Run J full-test) ===
+    file                                                        n   radius  element  Δ
+    runJ_ckpt6300_fulltest.json                              8217   0.5340   0.4785  -0.0555
+
+## 37. Lifts chain complete
+
+_Appended automatically by `run_j_resume_sequential.sh` at 2026-04-28 21:13 PDT._
+
+Run J ablation complete. See `FINAL_SUMMARY.md` for headline numbers comparing Run I and Run J under both metrics.
+
+## 38. Run J conclusion and next-step analysis
+
+_Appended manually 2026-04-28._
+
+### Headline: cui ablation lost head-to-head by **-1.45pp element-accuracy**
+
+| run | element-acc | tap-radius (legacy) | Δ vs baseline (element) |
+|---|---|---|---|
+| Baseline (zero-shot) | 0.3935 | 0.5257 | — |
+| **Run I ckpt-7800** (val-selected) | **0.4930** | 0.5468 | **+0.0995** |
+| Run J ckpt-6300 (val-selected) | 0.4785 | 0.5340 | +0.0851 |
+
+**Run I ckpt-7800 (element-acc 0.493) remains the publishable result.** cui ablation closed.
+
+### Per-action breakdown — actually shows what cui did
+
+| action | n | baseline | Run I 7800 | Run J 6300 | Δ (J - I) |
+|---|---|---|---|---|---|
+| navigate_back | 342 | 0.886 | 0.982 | 0.962 | **-0.020** |
+| type | 632 | 0.683 | 0.745 | 0.666 | **-0.079** ← biggest hit |
+| tap | 4897 | 0.689 | 0.691 | 0.686 | -0.005 |
+| scroll | 1179 | 0.179 | 0.218 | 0.214 | -0.004 |
+| wait | 559 | 0.002 | 0.056 | 0.043 | -0.013 |
+| open_app | 608 | 0.000 | 0.020 | 0.002 | -0.018 |
+
+**The hypothesis cui was supposed to validate (rare-class lift) didn't happen.** `wait` and `open_app` did not improve — they actually went *down* slightly. Run I (no rebalancing) already had the highest scores on those classes anyway. The biggest absolute regression was on `type` (632 rows × -7.9pp), a moderate-strong class that cui downweighted because it isn't rare-rare.
+
+### What we actually learned
+
+**Loss rebalancing is the wrong intervention for this dataset.** The class-imbalance literature (Cui et al. 2019) proves cui works on classification problems where the model only needs to distinguish C labels from each other. Our problem is structured differently: every action type is generated from the same JSON-decoder distribution, conditioned on screenshot+instruction. The bottleneck on rare classes (`wait`, `open_app`) is **not** that the model "doesn't see them often enough during training" — Run I already trains on all of them and learns them somewhat. The bottleneck is **input-level disambiguation**: a screenshot of an app drawer + the instruction "Open Slack" looks visually similar to a screenshot of the home screen + the instruction "Tap Slack icon". The model can't tell which to emit because both are plausible.
+
+Cui's per-row gradient boost on rare classes amplifies this confusion: the model gets stronger gradient signals on inputs it was already uncertain about, which makes its `type`/`tap`/`navigate_back` decisions noisier (the -7.9pp on `type`) without making the rare-class decisions sharper. **Net negative.**
+
+### Where the actual headroom is (room to grow, by row count)
+
+Run I ckpt-7800 leaves ~4170 of 8217 test rows wrong. The breakdown:
+
+| action | wrong rows | % of total errors | observation |
+|---|---|---|---|
+| tap | 1510 | 36% | huge but already 0.69 — hardest to move |
+| scroll | 922 | 22% | model picks `scroll` but wrong direction or schema |
+| open_app | 596 | 14% | model says `tap` instead of `open_app` |
+| wait | 528 | 13% | model says some action when GT is `wait` (no-op) |
+| type | 161 | 4% | content mismatch on text-entry rows |
+| navigate_back | 6 | <1% | saturated |
+
+**The three rare classes account for 39% of total errors** (scroll + open_app + wait = 2046 wrong rows). Lifting any one of them substantially would beat Run I.
+
+### Next-step options, ranked by ROI
+
+**Option 1 — Prompt-engineer the action taxonomy (no retrain, ~1h to test).**
+The current prompt asks for a JSON action but never enumerates the action space or the discriminating cues. Adding a system-prompt block like:
+
+```
+Available actions:
+- tap: interact with a visible UI element
+- type: enter text into a focused field
+- open_app: launch a named app from the launcher (NOT the same as tapping an icon in a list)
+- scroll: pan the visible area (specify direction: up/down/left/right)
+- navigate_back: dismiss the current screen
+- wait: emit when the screen is loading and no action is appropriate yet
+```
+
+…could fix `open_app`/`wait` misclassification without any training. Cheapest experiment, runs against existing Run I ckpt-7800 adapter, finishes in ~8 min on the val set.
+
+**Option 2 — Hard-negative oversampling (Run K candidate, ~6h).**
+Inflate the training set by sampling-with-replacement: 3-5x more `wait`, `open_app`, `scroll` rows. Keep everything else identical to Run I (lr=5e-5, r=16, 1 epoch, no cui). This does what cui *tried* to do, but at the *data* level instead of the *loss* level — the model sees the rare action's input pattern more often, which actually teaches discrimination instead of just penalizing wrongness on under-represented inputs. Standard imbalanced-classification practice.
+
+**Option 3 — Two-stage decoding (Run L candidate, ~2 days).**
+Force the model to emit `action_type` first, then condition the JSON body on it. Decoding the type first commits the model to a discrete choice that a body-shaped prediction can't paper over. More work; defer until 1+2 are exhausted.
+
+**Option 4 — Longer training / r=32 LoRA (~10h).**
+Val curve plateaued at ckpt-7800. Probably diminishing returns. Skip unless desperate.
+
+**Option 5 — Skip-action scoring (no real gain).**
+Drop `wait`/`open_app` from the metric. Number goes up on paper; product is no better. **Don't do this.**
+
+### Decision
+
+**Try Option 1 first.** Zero training cost, runs against the existing best adapter, can be tested in under an hour. If the taxonomy prompt lifts open_app/wait into the 0.10–0.20 range without hurting other classes, that's a free 3–5pp on the headline element-acc with no compute. If it stalls or breaks something, we have learned that the bottleneck is genuinely below the input layer (model can't *see* the difference) and Option 2 becomes the next move.
+
+Option 2 is the natural follow-up if Option 1 confirms the input is the bottleneck — cleaner and more defensible than cui because hard-negative oversampling doesn't change the loss function, only the data the loss is computed on.
