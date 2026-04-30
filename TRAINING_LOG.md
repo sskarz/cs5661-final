@@ -5,6 +5,21 @@ Toolchain: uv-managed CPython 3.12.13, PyTorch 2.10.0+cu128, Unsloth 2026.4.8 (c
 
 ---
 
+## Document layout
+
+This log is partitioned into two parts:
+
+- **Part 1 — AndroidControl (§1-§46)**: the core project. QLoRA fine-tuning of Gemma 4 E2B on AndroidControl, evaluated by element-accuracy. **This is the primary, headline-bearing work for the final project.** Headline: Run L LoRA = 0.5311 element-accuracy vs zero-shot baseline 0.3935 (+13.76 pp absolute / +35% relative).
+- **Part 2 — AndroidWorld downstream (§47+)**: side-quest. Plugging the trained LoRA into the AndroidWorld benchmark to measure live-emulator agent task success. **Optional / depth material**; may or may not be included in the final report depending on results. Mostly downstream-deployment infrastructure: harness design, fair-comparison contracts, smoke evidence on prompt-format OOD behavior. The AndroidControl results in Part 1 are not contingent on Part 2.
+
+The core project narrative ends at §46 with a clean positive result. Anything past that is value-add, not load-bearing.
+
+---
+
+# PART 1 — ANDROIDCONTROL (CORE PROJECT)
+
+---
+
 ## 1. Pre-flight checklist
 
 Before launching training we verified GPU + driver, free disk (1.2 TB), Python version, and the presence of the data-prep + training scripts. Two blockers were identified at this stage:
@@ -2489,6 +2504,24 @@ The lift is real, replicable, and the val→test ratio is consistent with the me
 ### Summary
 
 Run L sets a new project SOTA at 0.5311 element-accuracy (+13.76pp vs zero-shot baseline). The mechanism is well-understood (prior-action history half-repairs the scroll direction-flip bug we identified diagnostically during the val sweep) and the implementation is sound (parse rate, oracle ceiling, A/B integrity all clean). The +0.75pp incremental over Run K is small in headline terms but reflects a clean targeted lift on one specific class. Wait stays at floor as predicted — no longer a recipe-tunable problem.
+
+---
+
+# END OF PART 1 — ANDROIDCONTROL CORE PROJECT
+
+**Project headline:** Run L LoRA = 0.5311 element-accuracy on AndroidControl test (8217 rows) vs zero-shot Gemma 4 E2B baseline = 0.3935. **+13.76 pp absolute / +35% relative.** Mechanism documented; ablation chain clean (Runs B-L); methodology justified (val-aligned stopping, element-accuracy as the metric, fair-comparison contracts).
+
+Everything below this line is **Part 2 — downstream deployment infrastructure**. It is *not* required for the project's headline result and may or may not be included in the final report depending on AndroidWorld sweep outcomes.
+
+---
+
+# PART 2 — ANDROIDWORLD (DOWNSTREAM EVALUATION / SIDE-QUEST)
+
+This section covers plugging the trained Run L LoRA into the AndroidWorld benchmark for live-emulator agent task evaluation. AndroidWorld measures task success rate (canonical agent metric), which is a different and harder question than per-step element-accuracy. Includes setup notes, harness design decisions, smoke-test diagnostics, and contingency plans.
+
+**Important:** the AndroidControl results in Part 1 stand on their own. Whatever Part 2 produces (positive lift, parity, or transfer failure), it does not change the Part 1 headline. Part 2 adds depth if results are good and adds an honest negative-transfer story if they aren't.
+
+---
 
 ## 47. Project pivot — from offline element-accuracy to online AndroidWorld
 
