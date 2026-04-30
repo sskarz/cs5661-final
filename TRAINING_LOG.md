@@ -2594,3 +2594,60 @@ Sequential chosen over parallel because AndroidWorld assumes one agent per emula
 ### Next: §49 will land sweep results
 
 To be auto-appended when the sweep finishes — headline success rate per agent, per-difficulty + per-tag breakdown (`easy/medium/hard`, `data_entry/parameterized/multi_app`...), and a delta column showing where the LoRA helped/hurt.
+
+## 49. Contingency plan — what to do if LoRA loses on AndroidWorld
+
+_Appended 2026-04-29, mid-sweep. Pre-registered analysis path so the post-sweep decision isn't ad-hoc._
+
+The most-likely scenario when AndroidWorld results land: **LoRA per-step element-acc gain on AndroidControl (+14pp absolute, 0.39→0.53) does not translate into success-rate gain on AndroidWorld**, or only translates into a small/null delta. This isn't a failure of the LoRA — it's the expected outcome when per-step gains hit the multi-step error-compounding wall:
+
+> If per-step accuracy is `p`, then `P(N-step success) = p^N`.
+> At p=0.95, N=10: 0.60. At p=0.85, N=15: 0.087. The per-step→episode dropoff is brutal.
+
+Plus AndroidWorld is synthetic-task / different-app distribution vs AndroidControl human demos, so the LoRA's training distribution is mismatched to the eval distribution.
+
+### Decision tree (pre-registered)
+
+| AndroidWorld result | Interpretation | Next action |
+|---|---|---|
+| LoRA success-rate ≥ baseline + 3pp | Per-step gains survived multi-step. Strong project result; no further training needed. | Write report. Done. |
+| LoRA success-rate within ±3pp of baseline | Most likely outcome. Per-step gains compounded away. | **Run M: rejection-sampling SFT on episodes** (see below). |
+| LoRA success-rate < baseline − 3pp | Distribution-shift hurt more than helped. Likely the wait/scroll bugs at scale. | Run M, but with careful data-quality filter. |
+
+### Run M: rejection-sampling SFT on episodes (the right next step)
+
+**Concept.** Train on full successful trajectories instead of per-step rows. The model learns the trajectory distribution, not just the human per-step distribution. This is what UI-TARS-2 §3.2 ("successful trajectory replay") and V-Droid §4.1 do; reported gains are 5-15pp success rate over per-step SFT.
+
+**Data source.**
+- Run baseline + LoRA on AndroidWorld *train tasks* (the subset reserved for training, NOT the eval set). 
+- Filter to episodes where `is_successful == 1.0`. Keep the full step sequence.
+- Add: prefix-of-correct-actions from failed episodes (steps 0..k where step k+1 was the first wrong action) — this is the "monte carlo prefix filter" trick from V-Droid.
+- Convert to v3 schema (Path W + prior-action prefix) for training-distribution match.
+
+**Training recipe.**
+- Same QLoRA hyperparameters as Run L (r=16/α=32, lr=5e-5).
+- Same prompt format (v3 with prior action).
+- Mix Run L's 73K AndroidControl rows + Run M's filtered AW trajectories — probably 5-10× under-sampled given AW's smaller volume; use even mixing.
+- 1-2 epochs over the combined dataset; ~2-3 h on the 4090.
+
+**Evaluation.** Same AndroidWorld harness, same task subset. Headline: success rate vs Run L (current best LoRA).
+
+**Why this beats RL as the next step.**
+1. Same training pipeline already in place — no new infrastructure.
+2. ~3 h training cycle; RL would be 3-7 days (emulator rollout bottleneck).
+3. RL on a model that doesn't ground well wastes compute (UI-TARS-2 only reports RL gains *on top of* trajectory-replay SFT, never from per-step SFT directly).
+4. If Run M gains 5-15pp, project headline is significantly stronger and the report writes itself.
+
+### Run N (only if Run M still loses): RL with success-rate reward
+
+Reserved as future work / report addendum. Implementation cost: GRPO or RLOO on success-rate reward, ~5-10K AW episode rollouts. Wall time on this 4090: 3-7 days. Out of project budget for this term, but document as the natural next step.
+
+### Out-of-scope (data-scale ceiling)
+
+If Run M + Run N both fail to move the needle, we're at the data wall. UI-TARS used 76M trajectories; we have 73K + whatever AW train yields. The honest report framing: "SFT-then-RL pipeline reproduces the published gap; closing it requires data scale beyond the project budget."
+
+### Key references
+- UI-TARS-2 (Bai et al., 2025): trajectory-replay SFT before RL.
+- V-Droid (Tan et al., 2025): MC prefix filter + RL on AndroidWorld.
+- ShowUI (Lin et al., 2025): per-step SFT → trajectory SFT progression.
+- AndroidWorld original (Rawles et al., ICLR 2025): success-rate as canonical metric.
