@@ -15,8 +15,8 @@ mkdir -p "$LOGDIR"
 SWEEP_LOG=$LOGDIR/sweep.log
 
 # Baseline first
-BASE_LOG=$LOGDIR/baseline_full.log
-BASE_OUT=$HOME/android_world/runs/baseline_full
+BASE_LOG=$LOGDIR/baseline_full_v2.log
+BASE_OUT=$HOME/android_world/runs/baseline_full_v2
 mkdir -p "$BASE_OUT"
 echo "[$(date)] === BASELINE FULL SWEEP start ===" | tee -a "$SWEEP_LOG"
 cd "$AW"
@@ -29,8 +29,8 @@ cd "$AW"
 echo "[$(date)] === BASELINE FULL SWEEP done ===" | tee -a "$SWEEP_LOG"
 
 # LoRA
-LORA_LOG=$LOGDIR/lora_full.log
-LORA_OUT=$HOME/android_world/runs/lora_full
+LORA_LOG=$LOGDIR/lora_full_v2.log
+LORA_OUT=$HOME/android_world/runs/lora_full_v2
 mkdir -p "$LORA_OUT"
 echo "[$(date)] === LORA FULL SWEEP start ===" | tee -a "$SWEEP_LOG"
 cd "$AW"

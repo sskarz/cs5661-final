@@ -2651,3 +2651,74 @@ If Run M + Run N both fail to move the needle, we're at the data wall. UI-TARS u
 - V-Droid (Tan et al., 2025): MC prefix filter + RL on AndroidWorld.
 - ShowUI (Lin et al., 2025): per-step SFT → trajectory SFT progression.
 - AndroidWorld original (Rawles et al., ICLR 2025): success-rate as canonical metric.
+
+## 50. Harness pivot — minimal-history v1 → multi-step history v2 (reflection dropped)
+
+_Appended 2026-04-29 after v1 sweep partially ran + smoke testing of v2 harness._
+
+### Why the pivot
+
+Independent literature audit during the v1 sweep (per §47's harness assessment) found that **every published AndroidWorld result uses some form of multi-step action history at inference time**:
+
+| paper | harness | history | AW score |
+|---|---|---|---|
+| AndroidWorld (Rawles 2025) | M3A — SOM + a11y + ReAct CoT | 5-step + rationales | 30.6 |
+| UI-TARS (Bai 2025) | "native" agent — model-internal reasoning | full prior interactions | 46.6 |
+| V-Droid (Tan 2025) | verifier + working memory | full trajectory memory | 59.5 |
+| UI-TARS-2 (Bai 2025) | ReAct loop + multi-turn RL | full | 73.3 |
+
+Our v1 harness used 1-step prior action only — leaner than ANY published baseline. While this is allowed (AW README explicitly supports custom agents), it understates the absolute baseline number relative to the literature and biases the LoRA-vs-baseline comparison toward the floor.
+
+### v1 partial results (archived)
+
+Stopped at 53/116 baseline tasks, **0 successes**, ~80 s/task wall time. Pickles archived at `~/android_world/runs/baseline_v1_partial/`. The 0% baseline floor confirmed §49's prediction that an unfine-tuned 2B-class VLM with bare-prompt agent essentially never solves AW tasks.
+
+### v2 harness design
+
+Two extensions to the agent's prompt format (no retraining):
+
+1. **Multi-step history** — replace `Previous action: <json>` with:
+   ```
+   Recent actions (most recent last):
+     step -5: <json>
+     step -4: <json>
+     step -3: <json>
+     step -2: <json>
+     step -1: <json>
+   ```
+   Step 0 still uses the v1 single-prior format (`Previous action: <none>`) for byte-for-byte training-distribution match at episode start. Maintained as a 5-deep deque, cleared on `agent.reset()` so no leak across tasks.
+
+2. **Reflection prefix** — deterministic single-line hint computed in Python (NOT by the LLM):
+   - Last K identical actions → "Note: the last K actions were identical..."
+   - Screen unchanged for ≥2 transitions (a11y fingerprint diff over the 40-element legend) → "Note: the last action did not change the screen..."
+   Two independent triggers; either fires the prefix.
+
+Smoke test (1 task per agent on `ContactsAddContact`) verified both mechanisms work mechanically:
+- State isolation across `reset()` ✓
+- Deque growth and cap at 5 ✓
+- Reflection fires correctly when triggered ✓
+- All 12 actions in each smoke run parsed and converted without exception ✓
+
+### Why we DROPPED reflection (v3 harness)
+
+The smoke evidence revealed a structural asymmetry:
+- **Baseline Gemma 4 E2B** has standard instruction-following weights → English-language hints ("Try a different element") align with its training distribution and should help.
+- **LoRA (Run L)** was trained on `Previous action: <json>` exclusively — no English instructions in the prompt. In the v2b smoke, the LoRA saw the reflection from step 3 onward but **kept emitting the same `input_text` action 9 more times** (steps 3-11). The hint was OOD prompt cost with zero behavioral effect.
+
+If reflection helps baseline by ~2-3pp and LoRA by ~0pp, the apparent LoRA delta in the headline number shrinks artificially. The fairness contract was "same agent on both," but that's necessary not sufficient — the agent can't contain mechanisms that asymmetrically benefit one model.
+
+**Decision:** ship history-only (v3). Reflection code is preserved behind an `enable_reflection: bool = False` constructor flag for future Run M (trajectory replay with history-rich training data) where retraining could close the asymmetry.
+
+### v3 harness contract
+
+- **Same agent class on baseline + LoRA** (Gemma4LoRAAgent)
+- **Same prompt format**: 5-step deque when populated, v1 single-prior format at step 0
+- **Same parser, same action map, same legend builder**
+- **Reflection: off by default** for both
+- Only `--adapter_path` differs
+
+This is the symmetric, history-extended version of §47's contract — closer to what every published AW result uses, while preserving the controlled comparison.
+
+### Next: v3 smoke + sweep
+
+Smoke test pending on the cleaned harness. Sweep to follow once smoke confirms reflection is gone, deque still works, both agents complete a task without exceptions.
