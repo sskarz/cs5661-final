@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Sequential AndroidWorld full-sweep: baseline first, then LoRA (Run L ckpt-2100).
+# Sequential AndroidWorld full-sweep: LoRA first (so we can early-signal whether
+# the LoRA's per-step gains transfer at all), then baseline.
 # All paths are absolute — script changes cwd into android_world before invoking run.py.
+# Output paths use _v3 suffix matching the v3 harness (history-only, no reflection).
 set -e
 
 export JAVA_HOME=$HOME/.jdks/jdk-17.0.13+11
@@ -12,25 +14,11 @@ REPO=/home/sanskar/Documents/Github/cs5661-final
 AW=/home/sanskar/Documents/Github/android_world
 LOGDIR=$REPO/outputs/androidworld_logs
 mkdir -p "$LOGDIR"
-SWEEP_LOG=$LOGDIR/sweep.log
+SWEEP_LOG=$LOGDIR/sweep_v3.log
 
-# Baseline first
-BASE_LOG=$LOGDIR/baseline_full_v2.log
-BASE_OUT=$HOME/android_world/runs/baseline_full_v2
-mkdir -p "$BASE_OUT"
-echo "[$(date)] === BASELINE FULL SWEEP start ===" | tee -a "$SWEEP_LOG"
-cd "$AW"
-./.venv/bin/python run.py \
-    --suite_family=android_world \
-    --agent_name=gemma4_baseline \
-    --output_path="$BASE_OUT" \
-    > "$BASE_LOG" 2>&1 || \
-    echo "[$(date)] baseline sweep exited non-zero" | tee -a "$SWEEP_LOG"
-echo "[$(date)] === BASELINE FULL SWEEP done ===" | tee -a "$SWEEP_LOG"
-
-# LoRA
-LORA_LOG=$LOGDIR/lora_full_v2.log
-LORA_OUT=$HOME/android_world/runs/lora_full_v2
+# LoRA first
+LORA_LOG=$LOGDIR/lora_full_v3.log
+LORA_OUT=$HOME/android_world/runs/lora_full_v3
 mkdir -p "$LORA_OUT"
 echo "[$(date)] === LORA FULL SWEEP start ===" | tee -a "$SWEEP_LOG"
 cd "$AW"
@@ -41,5 +29,19 @@ cd "$AW"
     > "$LORA_LOG" 2>&1 || \
     echo "[$(date)] lora sweep exited non-zero" | tee -a "$SWEEP_LOG"
 echo "[$(date)] === LORA FULL SWEEP done ===" | tee -a "$SWEEP_LOG"
+
+# Baseline
+BASE_LOG=$LOGDIR/baseline_full_v3.log
+BASE_OUT=$HOME/android_world/runs/baseline_full_v3
+mkdir -p "$BASE_OUT"
+echo "[$(date)] === BASELINE FULL SWEEP start ===" | tee -a "$SWEEP_LOG"
+cd "$AW"
+./.venv/bin/python run.py \
+    --suite_family=android_world \
+    --agent_name=gemma4_baseline \
+    --output_path="$BASE_OUT" \
+    > "$BASE_LOG" 2>&1 || \
+    echo "[$(date)] baseline sweep exited non-zero" | tee -a "$SWEEP_LOG"
+echo "[$(date)] === BASELINE FULL SWEEP done ===" | tee -a "$SWEEP_LOG"
 
 echo "[$(date)] === BOTH SWEEPS COMPLETE ===" | tee -a "$SWEEP_LOG"
