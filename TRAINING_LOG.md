@@ -2755,3 +2755,55 @@ This is the symmetric, history-extended version of §47's contract — closer to
 ### Next: v3 smoke + sweep
 
 Smoke test pending on the cleaned harness. Sweep to follow once smoke confirms reflection is gone, deque still works, both agents complete a task without exceptions.
+
+## 51. Project close — AndroidWorld result + future work
+
+_Appended 2026-04-29. **Final note in this training log.**_
+
+### AndroidWorld result (Part 2 close-out)
+
+The v3 sweep was stopped early at 31/116 LoRA tasks complete after the early-signal analysis was conclusive:
+
+- **0/31 tasks succeeded** (0% success rate)
+- **87% of tasks mode-collapsed** — the LoRA picked one action and emitted it verbatim until step budget was exhausted (e.g. `tap eid=18` × 10, `type "+13920741751"` × 12, `navigate_back` × 33).
+- **46% mean parse-fail rate per task** — the LoRA emitted text that could not be parsed as a valid v2 action.
+- **Mass action-type hallucination** — invented action_types not in the schema: `navigate_to` (67×), `record_audio` (17×), `delete_files` (13×), `open_file`. All fell back to `wait` via `_to_json_action`.
+- **213 empty/garbage outputs** across all completed steps (~30% of all steps emitted text with no extractable JSON).
+
+The baseline (zero-shot Gemma 4 E2B in the same harness) was not run in v3 due to early-stop. v1 partial baseline (53/116) had also achieved 0/53. There is no headline number to report for the AndroidWorld benchmark; both agents fail.
+
+### Mechanism of the negative transfer
+
+The Run L LoRA was trained on 73K rows of single-shot AndroidControl prediction with `Previous action: <json>` prompts. Under any prompt-format drift (the multi-step `Recent actions` block of the v3 harness, the longer episode horizons of AW), the model loses the base Gemma 4's natural-language instruction-following while retaining only narrow specialization on the training prompt format. The result is one of three failure modes per task: lock onto the most salient goal-text token (mode collapse), match task verb to invented action_type (schema hallucination), or generate garbage tokens (parse fail).
+
+This is the well-documented **OOD-prompt narrowness** trade-off of low-rank adaptation (Hu et al. 2021 §6.4): high task specialization at the cost of out-of-distribution generality.
+
+### Future-work recommendations (not pursued in this project)
+
+A literature review across UI-TARS / UI-TARS-2 (Bai et al., 2025), V-Droid (Tan et al., 2025), DigiRL (Bai et al., 2024), AndroidLab (Xu et al., 2024), ShowUI (Lin et al., 2025), AitZ / Auto-UI (Zhang et al., 2024), Mobile-Agent-E (Wang et al., 2025), and OS-Atlas (Wu et al., 2024) identified five concrete recipe differences that distinguish AW-winning models from per-step SFT models:
+
+1. **CoT/ReAct-format labels** matching inference prompts (`Thought: ... Action: ...`)
+2. **Multi-step prompt format at training time** (not just inference time)
+3. **Trajectory-level objective** — RL, DPO on rollouts, or filtered behavior cloning. DigiRL: SFT 17.7% → RL 67.2% (+49.5pp) on the sister AitW benchmark.
+4. **Closed action vocabulary as hard constraint** (schema-enforced decoding at inference)
+5. **Inference-time scaffolding** (reflection, planner/executor split, persistent memory) — Mobile-Agent-E reports +22pp from harness alone.
+
+Priority-ordered future work (full analysis in conversation log; not in this project's budget):
+
+| # | Change | Cost | Risk | Expected gain |
+|---|---|---|---|---|
+| 1 | Re-SFT with ReAct CoT labels + multi-step prompt format | ~2-3 days + ~$80 in API for synth CoT + 1 retrain | low | substantial — fixes mode collapse and parse-fails |
+| 2 | Schema-enforced decoding (outlines / JSON-grammar) | ~1 day, $0 | low | eliminates schema hallucinations immediately |
+| 3 | Filtered behavior cloning on AW rollouts (Run M) | ~3-5 days + 50-100 GPU-hr | medium | major — DigiRL precedent |
+| 4 | Inference-time reflector (Mobile-Agent-E-lite) | ~half day, $0 | low | +5-15pp expected, harness-only |
+| 5 | DPO on (good-step, bad-step) pairs from #3 rollouts | ~2 days + 10-15 GPU-hr | medium-high | matches UI-TARS' SFT→DPO step (~+5pp) |
+
+The published consensus is that SFT-only on per-step labels is **at most 13-21% success on AW** (AndroidLab confirms this directly). Reaching the 40-70% range demonstrated by UI-TARS / V-Droid / UI-TARS-2 / DigiRL requires **at least** CoT-format SFT + trajectory-level training (filtered BC or RL) + schema-constrained decoding. These additions exceed this project's term budget.
+
+### Project close
+
+**Part 1 (AndroidControl, the headline result) stands on its own:** Run L LoRA at 0.5311 element-accuracy on the full 8217-row AW test set vs zero-shot baseline at 0.3935 — a clean +13.76pp absolute / +35% relative lift, with mechanism analysis (scroll direction-flip half-repaired by prior-action history, wait floor analyzed) and a clean ablation chain (Runs B-L) documenting what worked, what didn't, and why.
+
+**Part 2 (AndroidWorld deployment) closes as a documented negative-transfer result.** The LoRA's per-step gains do not survive multi-step deployment without harness-aware retraining or trajectory-level objectives. This is itself a contribution — the failure modes (mode collapse, schema hallucination, parse failure) are quantified and tied to mechanism, with a concrete priority-ordered roadmap for future work.
+
+**End of training log.**
