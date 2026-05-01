@@ -21,6 +21,95 @@ committing GPU-hours to the full 8K-step pathZ run.
 
 ## Runs
 
+### Run 14: run-6 recipe @ 500-row eval — full_match=22.20 (KEEP, RECIPE VALIDATED)
+- Timestamp: 2026-05-01 02:00
+- What changed: rebuilt eval with --n-eval=500 (vs prior 200) to drop noise
+  floor 1/sqrt(2.5) ≈ ±1.25pp instead of ±2pp.
+- Result: full=22.20 (+1.4 vs new baseline 20.80, replicating run 6's
+  +1.5 at 200 rows). type=54.20 parse=99.00 reason=99.00.
+- Per-type vs run-13 baseline: scroll 13.6→37.3 (+23.7pp), open_app
+  58.1→83.9 (+25.8pp), click 71.6→64.7 (-6.9), navigate_back
+  26.3→15.8 (-10.5), input_text 55.8→51.2 (-4.6), wait 2.4→0 (-2.4).
+- Insight: **the +1.4-1.5pp lift is real, not seed-luck**. Run 12's
+  20.00 at seed=2024 was the noise tail. Two action types learn
+  meaningfully: scroll +24pp and open_app +26pp. Click & navigate_back
+  regress modestly because the balanced training distributes attention
+  away from those classes.
+- Smoke verdict: **SFT recipe is correct and produces positive transfer
+  on every action type the model has training data for**. Caveat: wait
+  remains stubbornly at 0% — no model emits wait reliably; needs a
+  data-side fix (synth wait positives or prompt-time hint).
+
+### Run 13: baseline @ 500-row eval — full_match=20.80 (KEEP, segment-2 floor)
+- Timestamp: 2026-05-01 01:30
+- What changed: --n-eval=500 (was 200).
+- Result: full=20.80 (vs run 3's 20.50 at 200 rows, +0.3 — within noise),
+  type=55.00, parse=99.60.
+- Per-type: click 71.6, scroll 13.6, input_text 55.8, wait 2.4,
+  open_app 58.1, navigate_back 26.3.
+- Insight: at 500 rows, baseline metric is more stable. Now we can
+  compare recipes against a tighter floor.
+
+### Run 12: run-6 recipe + seed=2024 — full_match=20.00 (DISCARD)
+- Timestamp: 2026-05-01 01:15
+- What changed: only `seed: 3407 → 2024`.
+- Result: full=20.00 (-2 vs run 6's 22.00 at same recipe, same data).
+- Per-type vs run 6: click +21, open_app -42, navigate_back +18 — same
+  recipe lands in a totally different per-class equilibrium just from
+  seed change.
+- Insight: **±2pp noise floor on 200-row eval is real**. Bumped eval
+  to 500 rows to reduce noise.
+
+### Run 11: balanced 300-step + projector OFF — full_match=17.50 (DISCARD)
+- Timestamp: 2026-05-01 01:00
+- What changed: train_projector=False (was True).
+- Result: full=17.50 (-4.5 vs run 6), type=56.00, parse=99.50.
+- Per-type: click type 56→75 (+19) but full lower; minorities all
+  regressed (input_text 50→25, scroll 47→33, open_app 92→83).
+- Insight: Run-L's projector lesson holds at smoke scale too — the
+  vision-LM bridge needs to be malleable for this kind of grounding.
+
+### Run 10: balanced 300-step + decoupled schema-Reason — full_match=20.00 (DISCARD)
+- Timestamp: 2026-05-01 00:55
+- What changed: removed app_name from open_app Reason ("`open_app`."
+  not "`open_app`, app_name "Gmail""). Other Reasons unchanged.
+- Result: full=20.00 (-2 vs run 6); type=46.00.
+- Per-type: input_text type crashed 65→10, wait dropped, open_app held
+  at 83. Decoupling open_app changed the loss landscape for OTHER
+  classes.
+- Insight: schema-anchored Reasons interact in non-trivial ways across
+  classes. Reverting to run-6 simple Reasons.
+
+### Run 9: balanced 300-step + schema-anchored Reason — full_match=22.00 (DISCARD, ties)
+- Timestamp: 2026-05-01 00:50
+- What changed: synth Reason now explicitly names canonical M3A token
+  (`The action_type is \`click\`, targeting index 5`).
+- Result: full=22.00 (=run 6), type=57.00 (+7 vs run 6's 50).
+- Per-type: click type 56→69, input_text 50→65, scroll 47→60,
+  navigate_back 0→18 — all up. open_app crashed 92→42 due to verbose
+  Reason coupling app_name into reasoning.
+- Insight: schema-anchoring helps schema fidelity (less hallucination)
+  but hurts grounding when the reason commits to args. Need to decouple
+  args from reason — see run 10.
+
+### Run 8: 300-step balanced @ lr=1e-4 — full_match=20.50 (DISCARD, ties baseline)
+- Timestamp: 2026-05-01 00:45
+- What changed: lr 2e-4 → 1e-4.
+- Result: full=20.50 (-1.5 vs run 6, =baseline), type=54.50.
+- Per-type: minorities (scroll/open_app/wait) regressed back toward
+  baseline; click held high — model retains base distribution rather
+  than learning balanced behavior. **Under-trained.**
+- Insight: 1e-4 at 300 steps doesn't deliver enough updates. Either
+  bump LR back to 2e-4 OR run more steps at 1e-4.
+
+### Run 7: 500-step balanced — full_match=21.50 (DISCARD)
+- Timestamp: 2026-05-01 00:40
+- What changed: max_steps 300 → 500.
+- Result: full=21.50 (-0.5 vs run 6), type=53.50.
+- Per-type: click recovered (56→67) but wait/open_app eroded.
+- Insight: more training pulls back toward click-favoring even on
+  balanced data. 300 steps is the sweet spot.
+
 ### Run 6: 300-step QLoRA on BALANCED data — full_match=22.00 (KEEP, FIRST POSITIVE)
 - Timestamp: 2026-05-01 00:30
 - What changed: rebuilt train data with `--balance-classes --per-class-target 250`

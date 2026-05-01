@@ -15,6 +15,12 @@
 - **Substantive synthetic Reason** (build a sentence that uses goal text and
   a justification, not just "Click element 5"). Risk: model overfits to AC-
   test goals.
+- **Schema-anchored Reason** (e.g. "I will perform `click(index=5)`."): use
+  the EXACT M3A action_type token in the reason. Trains the model to echo
+  the canonical name rather than paraphrase ("type into a text field" →
+  "input_text"). High ROI if hallucination rate stays at ~5% post-training.
+- **Echo-the-action Reason** (e.g. `Reason: {"action_type": "click", ...}`)
+  duplicates the action JSON in the reason. Equivalent to copy-loss.
 - **No Reason at all** (label = `Action: {...}`). Tests whether reason is
   hurting rather than helping at this scale.
 - **Resample to fix open_app underrep** (currently 6.6% in train, 6% in eval
