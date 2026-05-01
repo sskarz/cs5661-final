@@ -19,7 +19,7 @@ from pathlib import Path
 # These get set on the CLI by autoresearch.sh; the file's *defaults* are
 # the recipe under test for the current iteration.
 DEFAULTS = {
-    "max_steps": 300,
+    "max_steps": 400,
     "lr": 2e-4,
     "batch_size": 1,
     "grad_accum": 4,
