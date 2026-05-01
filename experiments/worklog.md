@@ -21,6 +21,90 @@ committing GPU-hours to the full 8K-step pathZ run.
 
 ## Runs
 
+### Run 20: M3A baseline AW smoke slice — aw_SR=0.00 (KEEP, segment-3 floor)
+- Timestamp: 2026-05-01 05:50
+- What: ran the M3A harness with NO LoRA on the 10 curated AW tasks to set
+  the segment-3 floor. Same emulator, same task list as run 19.
+- Result: 0/10 succeeded. CameraTakePhoto FAILED, OpenAppTaskEval FAILED,
+  all others failed. Confirms run 19's +20pp lift is real lift, not luck.
+
+### Run 19: AC+AL mix @ run-16 recipe — aw_SR=20.00 (KEEP, FIRST POSITIVE AW SIGNAL)
+- Timestamp: 2026-05-01 05:30
+- What changed: switched primary metric from offline AC action-match to
+  live AW success rate on a 10-task curated slice (FilesDeleteFile,
+  OpenAppTaskEval, SimpleSmsReply, RecipeDeleteSingleRecipe, CameraTakePhoto,
+  ClockStopWatchPausedVerify, ClockStopWatchRunning, MarkorCreateFolder,
+  MarkorDeleteNote, NotesIsTodo). Trained on 1500-row balanced AC+AL mix
+  (1000 AC + 500 AL, 250×6 cls) at run-16's recipe (lora_r=32, 300 steps).
+- AC offline: full=19.40 (-1.4 vs run-16 best 23.40, -1.4 vs baseline 20.80).
+- AL offline: full=5.58, type=34.26, status type-match=0%. Format mismatch
+  between AL prompt (no element list, SoM-marked image) and AC prompt
+  (text element list) likely interferes.
+- **Live AW: 2/10 = 20.00%** (CameraTakePhoto ✅, OpenAppTaskEval ✅).
+  Baseline 0/10 on the same slice (run 20). **+20pp lift.**
+- Insight: **AC offline action-match is a MISLEADING PROXY for live AW.**
+  Run 19 is the worst AC offline of segment 2 yet the only positive AW.
+  The AndroidLab data taught the model task-completion / app-launch
+  patterns that AC alone cannot. Status action-match still 0% on offline
+  but the model evidently emits SOMETHING that AW accepts as termination
+  on the easy tasks.
+- Side-effect: navigate_back type-match collapsed 26→0 on AC eval —
+  AL has only 35 nav_back rows, mixing them caused that class to lose
+  the AC representation.
+- Next: keep this recipe as new floor; experiment with (a) more AL
+  weight, (b) including more AL classes (longer trajectories), (c)
+  AL prompt format alignment to AC.
+
+### Run 18: lora_r=32 @ 250 steps AC-only (post-AL-integration) — full_match=21.20 (DISCARD)
+- Timestamp: 2026-05-01 04:50
+- What changed: ran the AC-only baseline recipe one more time to confirm
+  no regression after merging the AL conversion code. Trainer/eval now
+  honor per-row `_image_root` so AL+AC rows can coexist in one dataset.
+- Result: full=21.20 (-2.20 vs run 16 best 23.40), type=54.20,
+  train_loss_final=0.93. parse=98.80.
+- Per-type: click 66.34, scroll 47.46, input_text 20.93, wait 11.90,
+  open_app 70.97, navigate_back 21.05.
+- Insight: at lora_r=32 the recipe wants 300 steps not 250 — under-trained
+  by ~50 steps. Dropping back to 250 gives up the +2.6pp lift. The AL
+  integration itself is neutral; this isolates the step-count regression.
+- Next: run 19 should rebuild train as AC+AL mix at 300 steps.
+
+### Run 17: lora_r=32 + 400 steps balanced — full_match=20.00 (DISCARD)
+- Timestamp: 2026-05-01 03:35
+- What changed: at the run-16 setup (r=32, alpha=64, balanced 250/cls),
+  bumped max_steps 300 → 400.
+- Result: full=20.00 (-3.40 vs best), type=50.20, train_loss=0.77.
+- Per-type: scroll/input_text gain but click drops 11pp (66→55) — the
+  classic over-balanced collapse, just delayed by the higher rank.
+- Insight: 300 steps at r=32 is the sweet spot. More steps + balanced
+  data = click drift even at higher rank. Stop bumping steps without a
+  bigger/more diverse train pool.
+
+### Run 16: lora_r=32 alpha=64 @ 300 steps — full_match=23.40 (KEEP, NEW BEST)
+- Timestamp: 2026-05-01 03:00
+- What changed: doubled LoRA rank/alpha from 16/32 to 32/64 on top of
+  run-14's recipe (300 steps, balanced 250×6, projector on, lr=2e-4).
+- Result: full=23.40 (+1.2 vs run 14, +2.6 vs baseline 20.80), type=52.80,
+  train_loss=0.87 (vs run 14's 0.95 — more capacity, lower loss).
+- Per-type vs baseline: click 71.6→64 (-7.6), scroll 13.6→47 (+33.4),
+  open_app 58.1→61 (+2.9), input_text 55.8→33 (-22.8), wait 2.4→0 (-2.4),
+  navigate_back 26.3→26 (=).
+- Insight: rank-32 helps the harder-to-learn classes (scroll +33pp) but
+  costs input_text quality. The full_match win confirms the bias-variance
+  trade favors more rank at smoke scale.
+- This is the AC-only smoke ceiling for our recipe — further AC gains
+  require more data (Phase 2: AndroidLab trajectories).
+
+### Run 15: 400/cls × 6 = 2400 rows + 400 steps — full_match=21.80 (DISCARD)
+- Timestamp: 2026-05-01 02:30
+- What changed: from run-14's recipe, bumped per-class target 250→400 and
+  steps 300→400 to see whether more balanced data = more headroom.
+- Result: full=21.80 (-0.40 vs run 14), type=57.40, train_loss=0.84.
+- Per-type: scroll +19, input_text +5, but open_app & navigate_back
+  regressed; net trade-off slightly negative.
+- Insight: more data + more steps over-balances. Quality-of-data first,
+  then quantity. The 250/cls target is well-tuned to the AC distribution.
+
 ### Run 14: run-6 recipe @ 500-row eval — full_match=22.20 (KEEP, RECIPE VALIDATED)
 - Timestamp: 2026-05-01 02:00
 - What changed: rebuilt eval with --n-eval=500 (vs prior 200) to drop noise

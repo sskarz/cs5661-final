@@ -100,4 +100,31 @@ Smoke data (cached after first build):
 (updated each iteration; see `experiments/worklog.md` for the running
 narrative)
 
-- (pending) Run 1: zero-shot baseline on M3A-format prompts.
+### Phase 1 — AC-only smoke (runs 1-18, COMPLETE)
+
+- **Best AC-only**: run 16 — `lora_r=32, alpha=64, 300 steps, balanced
+  250×6 cls, projector on, lr=2e-4` → 23.40% full_match (+2.6 vs 20.80
+  baseline at 500-row eval).
+- **Validated levers**: balanced training (+6pp swing vs class-collapse),
+  projector unlock (+4.5pp vs frozen), max_new_tokens=384 (avoids
+  truncation), 300 steps is the sweet spot (under-trains at 250, over-
+  balances at 400).
+- **Discarded**: schema-anchored Reason (no full-match gain), longer
+  training at higher rank (click drift), seed variance is ±2pp at
+  200-row eval → went to 500.
+- **Plateau**: AC-only smoke caps near +2.6pp. Per-class wait is stuck
+  at 0% (data has 7.4% wait but model never learns it) and AC entirely
+  lacks `status` (terminal) — this matches the M3A AW baseline's
+  dominant failure mode (67.9% max_steps_no_terminate).
+
+### Phase 2 — AndroidLab integration (CURRENT, run 19+)
+
+- Pulled THUDM Android-Lab Instruct dataset (Google Drive zip, 569MB).
+- Wrote `convert_androidlab_som.py`: maps SoM trajectories →
+  M3A-format smoke rows. 6053 converted, action mix:
+  click 4318 / status 716 / input_text 513 / scroll 471 / nav_back 35.
+- `prepare_smoke_data.py --androidlab-jsonl ... --include-status`
+  builds 50/50 AC/AL mixed train per class (status is AL-only).
+- Trainer/eval honor per-row `_image_root` so AC and AL images coexist.
+- Run 19 (in progress): first AC+AL mixed run @ run-16 recipe. Goal:
+  beat 23.40% AC-only ceiling.

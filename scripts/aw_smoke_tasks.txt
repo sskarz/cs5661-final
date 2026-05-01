@@ -1,0 +1,10 @@
+FilesDeleteFile
+OpenAppTaskEval
+SimpleSmsReply
+RecipeDeleteSingleRecipe
+CameraTakePhoto
+ClockStopWatchPausedVerify
+ClockStopWatchRunning
+MarkorCreateFolder
+MarkorDeleteNote
+NotesIsTodo
