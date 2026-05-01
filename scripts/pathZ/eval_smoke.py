@@ -35,6 +35,8 @@ def main() -> None:
     ap.add_argument("--max-new-tokens", type=int, default=384)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--save-preds", type=Path, default=None)
+    ap.add_argument("--text-only", action="store_true",
+                    help="Drop image at eval time (a11y-only mode).")
     args = ap.parse_args()
 
     rows: list[dict] = []
@@ -77,16 +79,26 @@ def main() -> None:
         user_text = next(
             c["text"] for c in row["messages"][0]["content"] if c["type"] == "text"
         )
-        img_root = Path(row.get("_image_root") or args.data_dir)
-        img = Image.open(img_root / row["image"]).convert("RGB")
-        msgs = [{"role": "user", "content": [
-            {"type": "image"}, {"type": "text", "text": user_text},
-        ]}]
-        text_prompt = processor.apply_chat_template(
-            msgs, add_generation_prompt=True
-        )
-        inputs = processor(text=text_prompt, images=[img], return_tensors="pt"
-                           ).to(model.device)
+        if args.text_only:
+            msgs = [{"role": "user", "content": [
+                {"type": "text", "text": user_text},
+            ]}]
+            text_prompt = processor.apply_chat_template(
+                msgs, add_generation_prompt=True
+            )
+            inputs = processor(text=text_prompt, return_tensors="pt"
+                               ).to(model.device)
+        else:
+            img_root = Path(row.get("_image_root") or args.data_dir)
+            img = Image.open(img_root / row["image"]).convert("RGB")
+            msgs = [{"role": "user", "content": [
+                {"type": "image"}, {"type": "text", "text": user_text},
+            ]}]
+            text_prompt = processor.apply_chat_template(
+                msgs, add_generation_prompt=True
+            )
+            inputs = processor(text=text_prompt, images=[img], return_tensors="pt"
+                               ).to(model.device)
         with torch.inference_mode():
             out = model.generate(
                 **inputs, max_new_tokens=args.max_new_tokens,

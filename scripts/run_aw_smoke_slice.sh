@@ -37,9 +37,19 @@ echo "[aw-smoke] tasks: $TASKS" | tee "$LOG"
 echo "[aw-smoke] adapter: ${ADAPTER:-<none, baseline>}" | tee -a "$LOG"
 
 cd "$AW"
+TEXT_ONLY=${TEXT_ONLY:-0}
+A11Y=${A11Y:-0}
 if [[ -z "$ADAPTER" ]]; then
   AGENT=m3a_gemma4_baseline
   EXTRA_ARGS=()
+elif [[ "$A11Y" == "1" ]]; then
+  AGENT=m3a_gemma4_lora_a11y
+  EXTRA_ARGS=(--adapter_path="$ADAPTER")
+  echo "[aw-smoke] mode=a11y (text-only + inventory + det-history + no-op)" | tee -a "$LOG"
+elif [[ "$TEXT_ONLY" == "1" ]]; then
+  AGENT=m3a_gemma4_lora_textonly
+  EXTRA_ARGS=(--adapter_path="$ADAPTER")
+  echo "[aw-smoke] mode=text-only (a11y-only, no screenshots)" | tee -a "$LOG"
 else
   AGENT=m3a_gemma4_lora
   EXTRA_ARGS=(--adapter_path="$ADAPTER")

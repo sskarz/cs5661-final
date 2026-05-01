@@ -26,7 +26,7 @@ DEFAULTS = {
     "warmup_steps": 12,
     "lora_r": 32,
     "lora_alpha": 64,
-    "max_length": 4096,
+    "max_length": 16384,
     "train_projector": True,
     "seed": 3407,
 }
@@ -41,6 +41,11 @@ def main() -> None:
     ap.add_argument("--model", default="unsloth/gemma-4-E2B-it")
     ap.add_argument("--output-dir", type=Path,
                     default=Path("outputs/pathZ_smoke"))
+    ap.add_argument("--text-only", action="store_true",
+                    help="Drop the image from each row at train time. "
+                         "The user prompt already contains the rendered "
+                         "UI elements text (a11y), so this exercises "
+                         "AndroidLab paper's XML/a11y-only mode.")
     for k, v in DEFAULTS.items():
         if isinstance(v, bool):
             ap.add_argument(f"--{k.replace('_', '-')}",
@@ -94,20 +99,20 @@ def main() -> None:
 
         def __getitem__(self, idx):
             row = self.rows[idx]
-            # Per-row _image_root takes precedence (lets us mix data sources
-            # rooted in different directories — AC + AndroidLab).
-            img_root = Path(row.get("_image_root") or self.root)
-            img = Image.open(img_root / row["image"]).convert("RGB")
             ut = next(c["text"] for c in row["messages"][0]["content"]
                       if c["type"] == "text")
             at = next(c["text"] for c in row["messages"][1]["content"]
                       if c["type"] == "text")
+            user_content = [{"type": "text", "text": ut}]
+            if not args.text_only:
+                # Per-row _image_root takes precedence (lets us mix data
+                # sources rooted in different directories — AC + AndroidLab).
+                img_root = Path(row.get("_image_root") or self.root)
+                img = Image.open(img_root / row["image"]).convert("RGB")
+                user_content.append({"type": "image", "image": img})
             return {
                 "messages": [
-                    {"role": "user", "content": [
-                        {"type": "text", "text": ut},
-                        {"type": "image", "image": img},
-                    ]},
+                    {"role": "user", "content": user_content},
                     {"role": "assistant", "content": [
                         {"type": "text", "text": at},
                     ]},

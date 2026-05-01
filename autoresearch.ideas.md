@@ -1,5 +1,56 @@
 # Autoresearch ideas backlog (pathZ smoke — Phase 2 AndroidLab-faithful)
 
+## After r31: harness rewrite for pure-a11y (user steer 2026-05-01)
+Make the harness more robust now that we're committed to a11y-only.
+Order by ROI:
+1. **Indexed app inventory in prompt**. Read `_PATTERN_TO_ACTIVITY`
+   from `adb_utils.py`, render as `Installed apps: 0: "Files"
+   (com.android.documentsui) ...` and prepend to action_prompt.
+   Constrain `open_app` to require an integer index. Mirror in
+   training prompts so the model learns to consume it. Largest
+   expected lift — "wrong app name at step 1" is our dominant
+   failure mode.
+2. **Deterministic history summaries**. Replace the second LLM call
+   per step (m3a.py:559) with a template: `Step N: {action} →
+   {executor_feedback}` where the feedback half is derived from a
+   small a11y-tree diff (focused window changed, list count
+   delta, etc.), NOT from another LLM call. Halves per-step
+   latency and removes a hallucination source.
+3. **Executor feedback in history**. Once history is deterministic,
+   surface index-validation, monkey launch result, and
+   package-name-not-found errors back into next step's prompt.
+4. **No-op detection**. After 2 consecutive identical
+   before-states, force `status(infeasible)` or a "try a different
+   approach" branch. Stops the 30-step retry-the-same-action
+   failure mode.
+5. **Teacher/student schema parity**. Make `prepare_smoke_data.py`
+   emit the EXACT new student prompt — indexed inventory +
+   deterministic history + UI elements. AC has step_index/
+   episode_id metadata to compute deterministic summaries.
+
+## NEXT (after r30): pure-a11y mode (user steer 2026-05-01)
+AndroidLab paper found XML/a11y mode beats SoM for fine-tuned ≤9B models
+(+3-6pp AW SR on their 9B variants; gap larger at smaller scale per
+literature on SLMs). Worth direct comparison on our 2B Gemma 4.
+
+**Audit verdict: GO-WITH-FIX.** Concrete patch set:
+1. **Data**: drop AL rows from training (625/1750 = 36%) since they have
+   `elements=[]` and no UI-element text in the prompt — they are SoM-only.
+   Train pure-a11y on AC-only (~1500 rows balanced 250/cls × 6, +
+   input_text boost stays). Run-16 recipe was AC-only and topped AC
+   offline at 23.4%; we never tested it on AW.
+2. **Harness**: patch `android_world/agents/m3a.py` line 419 (and the
+   summary call at line 571) to call `predict_mm(prompt, [])` — drop
+   both screenshots. The action_prompt already includes the rendered
+   UI element list, so the model retains full a11y grounding.
+3. **Wrapper**: no change — `m3a_gemma_wrapper.predict_mm` already
+   degrades gracefully when `images=[]`.
+4. **Schema**: no change. Same JSONL format, same train/eval scripts.
+
+Expected outcome: if AndroidLab's trend holds at 2B, pure-a11y should
+match or beat r22's 50% (with much lower variance since one input
+modality removes a major source of distribution noise).
+
 ## Phase 2 immediate (high priority)
 - **Pull `THUDM/Android-Lab` Instruction dataset** — HF or GitHub release.
   Inspect schema: trajectories vs flat steps, action vocab, history format.

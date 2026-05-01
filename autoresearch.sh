@@ -23,6 +23,12 @@ fi
 
 OUT=outputs/pathZ_smoke
 RECIPE=${RECIPE:-train}
+TEXT_ONLY=${TEXT_ONLY:-0}
+TEXT_ONLY_FLAG=""
+if [[ "$TEXT_ONLY" == "1" ]]; then
+  TEXT_ONLY_FLAG="--text-only"
+  echo "[autoresearch] mode=text-only (a11y-only, no images)"
+fi
 
 if [[ "$RECIPE" == "baseline" ]]; then
   echo "[autoresearch] phase=baseline (no training)"
@@ -38,7 +44,8 @@ echo "[autoresearch] phase=train"
 rm -rf "$OUT"
 uv run python scripts/pathZ/train_smoke.py \
     --train-jsonl "$TRAIN" \
-    --output-dir "$OUT"
+    --output-dir "$OUT" \
+    $TEXT_ONLY_FLAG
 
 # --- 3) Eval the trained LoRA on AC-val (grounding proxy) ---
 echo "[autoresearch] phase=eval-ac (trained adapter)"
@@ -46,6 +53,7 @@ uv run python scripts/pathZ/eval_smoke.py \
     --adapter "$OUT/checkpoint-final" \
     --eval-jsonl "$EVAL" \
     --save-preds outputs/pathZ_smoke_eval/trained_ac.jsonl \
+    $TEXT_ONLY_FLAG \
     | sed 's/^METRIC \([a-zA-Z_]*\)=/METRIC ac_\1=/'
 
 # --- 4) Eval on AL-val (trajectory proxy, closer to AW distribution) ---
@@ -56,5 +64,6 @@ if [[ -f "$EVAL_AL" ]]; then
       --adapter "$OUT/checkpoint-final" \
       --eval-jsonl "$EVAL_AL" \
       --save-preds outputs/pathZ_smoke_eval/trained_al.jsonl \
+      $TEXT_ONLY_FLAG \
       | sed 's/^METRIC \([a-zA-Z_]*\)=/METRIC al_\1=/'
 fi

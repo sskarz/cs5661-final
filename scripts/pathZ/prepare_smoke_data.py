@@ -108,6 +108,11 @@ def main() -> None:
                          "distribution. Eval is left untouched.")
     ap.add_argument("--per-class-target", type=int, default=250,
                     help="Target rows per action type when --balance-classes.")
+    ap.add_argument("--boost-input-text", type=int, default=1,
+                    help="Multiply per-class-target by this factor for the "
+                         "input_text class only. r29 collapsed input_text "
+                         "to 0% AC type-match — boosting it back into the "
+                         "training mix is intended to recover that emission.")
     ap.add_argument("--androidlab-jsonl", type=Path, default=None,
                     help="If set, mix AndroidLab SoM-converted rows into "
                          "training (50/50 with AC for classes both have).")
@@ -207,8 +212,11 @@ def main() -> None:
             print(f"[prep] dropping action_type={k} ({len(buckets[k])} rows)")
             buckets.pop(k)
         rng2 = random.Random(args.seed + 1)
-        target = args.per_class_target
         n_train_written = 0
+        def _target_for(at: str) -> int:
+            if at == "input_text" and args.boost_input_text > 1:
+                return args.per_class_target * args.boost_input_text
+            return args.per_class_target
         # Optionally include status from AndroidLab as its own class.
         if args.include_status and "status" in al_buckets:
             classes_to_emit = list(buckets.keys()) + ["status"]
@@ -218,6 +226,7 @@ def main() -> None:
             for at in sorted(set(classes_to_emit)):
                 ac_rows = buckets.get(at, [])
                 al_rows = al_buckets.get(at, [])
+                target = _target_for(at)
                 # When both pools have the class, take half from each to
                 # diversify the training distribution. When only one has it,
                 # use that pool.

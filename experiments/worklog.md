@@ -21,6 +21,32 @@ committing GPU-hours to the full 8K-step pathZ run.
 
 ## Runs
 
+### Run 32: same r31 adapter + harness patches (no-op widening, status/answer guards, tolerant parser) — aw_SR=5.00 (DISCARD)
+- Timestamp: 2026-05-01 16:55
+- What changed: kept r31's adapter; patched M3AA11Y harness — `_NAV_ACTIONS` widened to include scroll/input_text, `status(complete)` guard refusing on no-change, `answer(...)` guard requiring at least one open_app+click, tolerant JSON parser (brace-balance walking, truncation repair), `max_new_tokens` 256→384.
+- Result: 1/20 = 5% (only OpenAppTaskEval). ClockStopWatchRunning regressed (it succeeded in r31 with same adapter). Within σ≈7pp of r31's 10% — statistically indistinguishable.
+- Insight: harness scaffolding alone cannot lift a fixed adapter. The model's premature `status(complete)` after 2-3 steps is the real ceiling — guards refuse some bad emissions but the model finds new ones. This *strongly* validates the schema-parity hypothesis: until the adapter is trained on the new harness's prompt format, the harness investments stay dormant.
+- Next: schema parity retrain (regenerate AC training rows to match the new harness prompt format with inventory + det-history + executor feedback).
+
+### Run 31: pure-a11y AC-only + new M3AA11Y harness (4 patches) — aw_SR=10.00 (KEEP)
+- Timestamp: 2026-05-01 16:00
+- What changed: training data dropped AL rows (kept 1500 AC-only with input_text boost), `--text-only` flag added (no images at train + eval), max_length 4096→16384, M3AA11Y harness with: indexed app inventory in prompt, deterministic step summaries (no LLM summary call), executor feedback in history, no-op detection (force `status(infeasible)` after 2 consecutive nav-class no-ops).
+- Result: 2/20 = 10% (ClockStopWatchRunning + OpenAppTaskEval). open_app type-match=96.77% (highest yet); pure-a11y emitted status=2% on AL despite no status training.
+- Insight: First pure-a11y AW data point — confirms a11y-only inference works on this 2B base. open_app accuracy lifted significantly. But absolute SR no better than r19's 20% (10pp lower), so pure-a11y isn't the silver bullet AndroidLab paper suggested for ≤9B models. Their finding was on AndroidLab benchmark, not AW — different app distribution.
+- Next: r32 patches harness; if no lift, schema parity is the necessary move.
+
+### Run 30: input_text boost x2 (CANCELLED before AW eval) — DISCARD
+- Timestamp: 2026-05-01 12:30
+- What changed: increased input_text rows in training mix to fix the input_text emission collapse seen in r29.
+- Result: AC offline DROPPED to 14.20% (-6.8 vs r29). Boost diluted click/scroll/navigate_back; input_text only moved 0% → 2.33%. User cancelled before AW eval.
+- Insight: more input_text rows do NOT fix the structural emission problem. Pivot to pure-a11y for r31.
+
+### Run 29: r22 verbatim (default seed=3407) on 20-task slice — aw_SR=0.00 (DISCARD)
+- Timestamp: 2026-05-01 11:00
+- What changed: identical recipe and seed as r22 (md5-confirmed identical training data), but ran the 20-task slice instead of 10. Goal: confirm r22's 50% was reproducible with same seed.
+- Result: 0/20 = 0% AW SR. AC offline 21.00% (typical for r22 family). AC input_text COLLAPSED to 0% (was 37.5% in r22's matched run).
+- Insight: HUGE blow to r22 reproducibility. Four-sample r22-recipe distribution: 50/10/20/0 → mean=20%, σ≈21pp. CUDA non-determinism makes seed-fixed reruns diverge wildly. Recipe is genuinely seed-fragile, not just slice-noisy. Variance reduction (multi-seed eval) is now a hard requirement.
+
 ### Run 20: M3A baseline AW smoke slice — aw_SR=0.00 (KEEP, segment-3 floor)
 - Timestamp: 2026-05-01 05:50
 - What: ran the M3A harness with NO LoRA on the 10 curated AW tasks to set

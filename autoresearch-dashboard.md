@@ -1,7 +1,8 @@
 # Autoresearch Dashboard: pathZ-sft-smoke
 
-**Runs:** 28 | **Kept:** 10 | **Discarded:** 18 | **Crashed:** 0
-**Best (segment 3, AW SR primary):** **50.00% (#22)** — but 3-sample variance study (r22/r26/r28: 50/10/20) shows recipe true mean ≈26.7%, σ≈21pp; r22 was upward outlier
+**Runs:** 32 | **Kept:** 11 | **Discarded:** 21 | **Crashed:** 0
+**Best (segment 3, AW SR primary):** **50.00% (#22)** — but 4-sample variance study (r22/r26/r28/r29: 50/10/20/0) shows recipe true mean ≈20%, σ≈21pp; r22 was upward outlier
+**Latest baseline on 20-task slice:** r31 = 10% (pure-a11y AC-only + M3AA11Y harness); r32 = 5% (same adapter + harness patches; within noise)
 **Best (segment 2, AC offline):** 23.40% (#16, +2.6 vs floor)
 
 ## Segment 0 (max_new=128 eval, 200-row eval)
