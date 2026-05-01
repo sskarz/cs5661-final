@@ -103,6 +103,11 @@ def main() -> None:
     ap.add_argument("--n-train", type=int, default=2000)
     ap.add_argument("--n-eval", type=int, default=200)
     ap.add_argument("--seed", type=int, default=3407)
+    ap.add_argument("--balance-classes", action="store_true",
+                    help="Resample train per-action-type to a uniform "
+                         "distribution. Eval is left untouched.")
+    ap.add_argument("--per-class-target", type=int, default=250,
+                    help="Target rows per action type when --balance-classes.")
     args = ap.parse_args()
 
     src = Path(args.src)
@@ -158,16 +163,53 @@ def main() -> None:
 
     out_train = out / "train.jsonl"
     out_eval = out / "eval.jsonl"
-    n_train_written = 0
-    with open(out_train, "w") as f:
+
+    if args.balance_classes:
+        # Bucket all source train rows by their post-conversion M3A
+        # action_type, then sample per-class up to the target count
+        # (with replacement when the source pool is short).
+        from collections import defaultdict
+        buckets: dict[str, list[dict]] = defaultdict(list)
         for r in train_src:
-            if n_train_written >= args.n_train:
-                break
             row = _build_row(r, _history_for(r, train_by_ep))
             if row is None:
                 continue
-            f.write(json.dumps(row) + "\n")
-            n_train_written += 1
+            buckets[row["gt_m3a"]["action_type"]].append(row)
+        # Drop classes whose source pool is much smaller than the target —
+        # otherwise we replay the same handful of rows many times, which
+        # overfits to that class. Keep replay factor ≤ ~2.5x.
+        min_pool = max(5, args.per_class_target // 3)
+        skipped = [k for k, v in buckets.items() if len(v) < min_pool]
+        for k in skipped:
+            print(f"[prep] dropping action_type={k} ({len(buckets[k])} rows)")
+            buckets.pop(k)
+        rng2 = random.Random(args.seed + 1)
+        target = args.per_class_target
+        n_train_written = 0
+        with open(out_train, "w") as f:
+            for at, rows in sorted(buckets.items()):
+                # If pool is smaller than target, sample with replacement.
+                if len(rows) >= target:
+                    samp = rng2.sample(rows, target)
+                else:
+                    samp = [rng2.choice(rows) for _ in range(target)]
+                rng2.shuffle(samp)
+                for row in samp:
+                    f.write(json.dumps(row) + "\n")
+                    n_train_written += 1
+                print(f"[prep]   {at:18s} pool={len(rows):4d}  "
+                      f"sampled={len(samp):4d}")
+    else:
+        n_train_written = 0
+        with open(out_train, "w") as f:
+            for r in train_src:
+                if n_train_written >= args.n_train:
+                    break
+                row = _build_row(r, _history_for(r, train_by_ep))
+                if row is None:
+                    continue
+                f.write(json.dumps(row) + "\n")
+                n_train_written += 1
 
     n_eval_written = 0
     with open(out_eval, "w") as f:
