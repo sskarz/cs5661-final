@@ -1,41 +1,49 @@
-# Autoresearch ideas backlog (pathZ smoke)
+# Autoresearch ideas backlog (pathZ smoke — Phase 2 AndroidLab-faithful)
 
-## High-priority recipe variations
-- **Lower LR (1e-4)**: 200/500 steps damaged open_app at 2e-4. A gentler LR
-  may preserve base capabilities while still learning M3A schema.
-- **Higher LR (3e-4)**: pushes more strongly toward the response distribution
-  per step; with cosine decay, may fix grounding faster.
-- **Disable projector training**: Run L's "projector matters" came from full-
-  scale training. At smoke scale, unfreezing the projector may inject too
-  much variance.
-- **Lower lora_r (8)**: smaller capacity may force concentration on action
-  schema instead of memorization.
+## Phase 2 immediate (high priority)
+- **Pull `THUDM/Android-Lab` Instruction dataset** — HF or GitHub release.
+  Inspect schema: trajectories vs flat steps, action vocab, history format.
+- **Write `convert_androidlab.py`** — map their action schema to M3A:
+  - `tap` → `click(index=N)`
+  - `swipe` → `scroll(direction=...)`
+  - `text` → `input_text(index, text)`
+  - `back/home` → `navigate_back/navigate_home`
+  - `finish(success)` → `status(goal_status="complete")`
+  - `finish(impossible)` → `status(goal_status="infeasible")`
+- **Multi-step prompt rendering** — bake the prior step summaries into
+  the user prompt, mirroring how M3A passes history at AW eval time.
+- **ReAct-style Reason** — convert AndroidLab's "Thought" field to our
+  Reason. Their thoughts are 1-3 sentences explaining the next action;
+  much richer than the synthetic one-liners we've been using.
+- **Mixed-source eval set** — sample held-out rows from BOTH
+  AndroidLab-val and AndroidControl-val. AC-only eval may understate
+  the impact of trajectory training.
 
-## Data variations
-- **Substantive synthetic Reason** (build a sentence that uses goal text and
-  a justification, not just "Click element 5"). Risk: model overfits to AC-
-  test goals.
-- **Schema-anchored Reason** (e.g. "I will perform `click(index=5)`."): use
-  the EXACT M3A action_type token in the reason. Trains the model to echo
-  the canonical name rather than paraphrase ("type into a text field" →
-  "input_text"). High ROI if hallucination rate stays at ~5% post-training.
-- **Echo-the-action Reason** (e.g. `Reason: {"action_type": "click", ...}`)
-  duplicates the action JSON in the reason. Equivalent to copy-loss.
-- **No Reason at all** (label = `Action: {...}`). Tests whether reason is
-  hurting rather than helping at this scale.
-- **Resample to fix open_app underrep** (currently 6.6% in train, 6% in eval
-  — consistent — but boost to 15% to compensate for AC's bias).
+## Phase 2 follow-on (medium priority)
+- **Mixing weight sweep**: AndroidLab vs AndroidControl at 45/35,
+  60/30, 100/0 to see how much each contributes.
+- **Trajectory-aware loss masking**: in multi-step rows, do we mask
+  loss on prior-action history (response-only) or compute full-sequence
+  loss including thoughts at every prior step?
+- **Length scaling**: AndroidLab trajectories are longer than AC
+  single-steps. May need max_length=8192 (currently 4096).
 
-## Eval variations
-- **Stratified eval scoring** (weight per-action-type so click doesn't
-  dominate the headline).
-- **Loose match for input_text** (ignore index, just check action_type +
-  text length similarity). Currently input_text full=0% which kills the
-  headline number even when type and rough text match.
+## Phase 1 levers we can still re-test once Phase 2 lands
+- **lora_r 32 + 300 steps** = run 16 = current best (23.40%) on AC-only
+- Per-class target 250 vs 400 — found 250 was sweet spot on AC
+- Schema-anchored Reason — discarded on AC because it interferes with
+  open_app args; AndroidLab's natural Thought field may sidestep this
+- Class balancing — the AC fix may not be needed at all once
+  AndroidLab's natural multi-action mix is in (their trajectories
+  contain finish actions which AC lacks entirely)
 
 ## Architectural changes (only if simple variations cap)
-- **Constrained decoding** (outlines/llguidance) on the eval to prevent
-  any non-schema action_type from being scored at all. Inference-time only.
-- **Longer training data** (4K rows from the full 73K AC-train).
-- **Add long_press / status / answer synthetic rows** to teach actions AC
-  doesn't have.
+- **Constrained decoding** (outlines/llguidance) at AW eval to enforce
+  the M3A schema vocabulary
+- **AC trajectory reconstruction** — AC has episode_id/step_index
+  metadata; we could group AC rows back into trajectories and add
+  multi-step history that way. Backup if AndroidLab data is hard to
+  use.
+- **Add long_press / status / answer synthetic rows** to teach actions
+  AC doesn't have. AndroidLab Instruction trajectories should bring
+  status naturally.

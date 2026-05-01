@@ -19,11 +19,11 @@ from pathlib import Path
 # These get set on the CLI by autoresearch.sh; the file's *defaults* are
 # the recipe under test for the current iteration.
 DEFAULTS = {
-    "max_steps": 300,
+    "max_steps": 250,
     "lr": 2e-4,
     "batch_size": 1,
     "grad_accum": 4,
-    "warmup_steps": 15,
+    "warmup_steps": 12,
     "lora_r": 32,
     "lora_alpha": 64,
     "max_length": 4096,
@@ -94,7 +94,10 @@ def main() -> None:
 
         def __getitem__(self, idx):
             row = self.rows[idx]
-            img = Image.open(self.root / row["image"]).convert("RGB")
+            # Per-row _image_root takes precedence (lets us mix data sources
+            # rooted in different directories — AC + AndroidLab).
+            img_root = Path(row.get("_image_root") or self.root)
+            img = Image.open(img_root / row["image"]).convert("RGB")
             ut = next(c["text"] for c in row["messages"][0]["content"]
                       if c["type"] == "text")
             at = next(c["text"] for c in row["messages"][1]["content"]

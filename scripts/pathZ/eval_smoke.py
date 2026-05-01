@@ -77,7 +77,8 @@ def main() -> None:
         user_text = next(
             c["text"] for c in row["messages"][0]["content"] if c["type"] == "text"
         )
-        img = Image.open(args.data_dir / row["image"]).convert("RGB")
+        img_root = Path(row.get("_image_root") or args.data_dir)
+        img = Image.open(img_root / row["image"]).convert("RGB")
         msgs = [{"role": "user", "content": [
             {"type": "image"}, {"type": "text", "text": user_text},
         ]}]

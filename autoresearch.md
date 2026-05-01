@@ -1,24 +1,43 @@
-# Autoresearch: pathZ M3A-format SFT smoke
+# Autoresearch: pathZ M3A-format SFT smoke (AndroidLab-faithful)
 
 ## Objective
 
-Validate the AndroidLab-style **SFT recipe** on Gemma 4 E2B before any
-full training run. The pathZ plan (ANDROID_WORLD_PLAN.md) commits to a
-multi-source SFT mixture in **M3A's exact prompt + action vocabulary**.
-Before scaling to the full 8K-step plan we must prove on a tiny slice
-that:
+Reproduce the **AndroidLab XML-mode SFT recipe** (Xu et al. 2024,
+arXiv:2410.24024) at smoke scale on Gemma 4 E2B, in M3A's exact prompt
+and action vocabulary. AndroidLab reports 2.17 → 23.91% on the
+AndroidLab benchmark using SFT alone; the bar for our pathZ plan is
+beating the M3A AW baseline by ≥15pp absolute.
 
-1. The data converter actually produces well-formed M3A-format examples.
-2. The trainer converges (training loss drops).
-3. The trained LoRA, evaluated offline on M3A-format prompts, **beats
-   the zero-shot Gemma 4 E2B baseline** on a held-out 200-row eval.
+### Phase 1 — infra validation (DONE through run 17)
 
-If any of the above fails at smoke scale, the full SFT will fail too —
-better to find that out in 5 minutes than 24 hours.
+Validated on AC single-step alone:
+- M3A action vocabulary alignment between training labels and eval
+  parser ✓
+- Balanced training prevents click-class collapse ✓
+- 300-step QLoRA at lr=2e-4 + projector unlocked + lora_r=32
+  → +2.6pp full_match vs zero-shot baseline ✓
+- 99% parse rate / 99% reason rate after training ✓
 
-We do NOT run full AW evals here. The smoke metric is offline action-
-match on M3A-format prompts derived from AndroidControl-val. Once smoke
-shows positive results, we move to full SFT (separate plan).
+### Phase 2 — AndroidLab data integration (CURRENT, run 18+)
+
+The infra works. Now make the smoke faithful to AndroidLab's actual
+training distribution:
+
+1. **Pull `THUDM/Android-Lab` Instruction dataset** (~6K multi-step
+   trajectories with history baked into prompt).
+2. **Convert their trajectories to our unified M3A action vocabulary**.
+3. **Mix AndroidLab + AndroidControl** at the day-2 weighting (45/35
+   split).
+4. **Use a longer, ReAct-style Reason** (Thought: rationale → Action:
+   JSON) per their CoT format.
+5. **Smoke-train and prove the AndroidLab data shifts the offline
+   metrics differently than AC-only training**.
+
+### What we still do NOT do
+
+We do NOT run full AW evals here. Phase 2 success criterion is offline
+action-match on a mixed (AndroidLab-val + AndroidControl-val) eval set,
+showing the recipe is positive transfer at smoke scale.
 
 ## Metrics
 

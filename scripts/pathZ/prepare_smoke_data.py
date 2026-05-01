@@ -108,6 +108,12 @@ def main() -> None:
                          "distribution. Eval is left untouched.")
     ap.add_argument("--per-class-target", type=int, default=250,
                     help="Target rows per action type when --balance-classes.")
+    ap.add_argument("--androidlab-jsonl", type=Path, default=None,
+                    help="If set, mix AndroidLab SoM-converted rows into "
+                         "training (50/50 with AC for classes both have).")
+    ap.add_argument("--include-status", action="store_true",
+                    help="If set, also include a `status` class in the "
+                         "balanced train mix (AndroidLab-only).")
     args = ap.parse_args()
 
     src = Path(args.src)
@@ -164,6 +170,10 @@ def main() -> None:
     out_train = out / "train.jsonl"
     out_eval = out / "eval.jsonl"
 
+    # Stamp absolute image roots so the trainer/evaluator can locate
+    # images from multiple sources without juggling --data-dir flags.
+    AC_IMG_ROOT = str(src.resolve())
+
     if args.balance_classes:
         # Bucket all source train rows by their post-conversion M3A
         # action_type, then sample per-class up to the target count
@@ -174,7 +184,20 @@ def main() -> None:
             row = _build_row(r, _history_for(r, train_by_ep))
             if row is None:
                 continue
+            row["_image_root"] = AC_IMG_ROOT
             buckets[row["gt_m3a"]["action_type"]].append(row)
+
+        # AndroidLab mix: load the converted AndroidLab SoM rows and add to
+        # the same buckets. AndroidLab covers click/input_text/scroll/
+        # navigate_back/status (no wait/open_app — those are AC-only).
+        al_buckets: dict[str, list[dict]] = defaultdict(list)
+        if args.androidlab_jsonl is not None:
+            with open(args.androidlab_jsonl) as f:
+                for line in f:
+                    r = json.loads(line)
+                    al_buckets[r["gt_m3a"]["action_type"]].append(r)
+            print(f"[prep] AndroidLab pool sizes: "
+                  f"{ {k: len(v) for k, v in al_buckets.items()} }")
         # Drop classes whose source pool is much smaller than the target —
         # otherwise we replay the same handful of rows many times, which
         # overfits to that class. Keep replay factor ≤ ~2.5x.
@@ -186,19 +209,44 @@ def main() -> None:
         rng2 = random.Random(args.seed + 1)
         target = args.per_class_target
         n_train_written = 0
+        # Optionally include status from AndroidLab as its own class.
+        if args.include_status and "status" in al_buckets:
+            classes_to_emit = list(buckets.keys()) + ["status"]
+        else:
+            classes_to_emit = list(buckets.keys())
         with open(out_train, "w") as f:
-            for at, rows in sorted(buckets.items()):
-                # If pool is smaller than target, sample with replacement.
-                if len(rows) >= target:
-                    samp = rng2.sample(rows, target)
+            for at in sorted(set(classes_to_emit)):
+                ac_rows = buckets.get(at, [])
+                al_rows = al_buckets.get(at, [])
+                # When both pools have the class, take half from each to
+                # diversify the training distribution. When only one has it,
+                # use that pool.
+                if ac_rows and al_rows:
+                    half = target // 2
+                    s_ac = (rng2.sample(ac_rows, min(half, len(ac_rows)))
+                            if len(ac_rows) >= half
+                            else [rng2.choice(ac_rows) for _ in range(half)])
+                    s_al = (rng2.sample(al_rows, min(target - half, len(al_rows)))
+                            if len(al_rows) >= target - half
+                            else [rng2.choice(al_rows) for _ in range(target - half)])
+                    samp = s_ac + s_al
+                    src_label = f"AC={len(s_ac)}+AL={len(s_al)}"
                 else:
-                    samp = [rng2.choice(rows) for _ in range(target)]
+                    pool = ac_rows or al_rows
+                    if not pool:
+                        continue
+                    if len(pool) >= target:
+                        samp = rng2.sample(pool, target)
+                    else:
+                        samp = [rng2.choice(pool) for _ in range(target)]
+                    src_label = f"{'AC' if ac_rows else 'AL'}={len(samp)}"
                 rng2.shuffle(samp)
                 for row in samp:
                     f.write(json.dumps(row) + "\n")
                     n_train_written += 1
-                print(f"[prep]   {at:18s} pool={len(rows):4d}  "
-                      f"sampled={len(samp):4d}")
+                print(f"[prep]   {at:18s} ac_pool={len(ac_rows):4d} "
+                      f"al_pool={len(al_rows):4d} sampled={len(samp):4d} "
+                      f"({src_label})")
     else:
         n_train_written = 0
         with open(out_train, "w") as f:
@@ -219,6 +267,7 @@ def main() -> None:
             row = _build_row(r, _history_for(r, val_by_ep))
             if row is None:
                 continue
+            row["_image_root"] = AC_IMG_ROOT
             f.write(json.dumps(row) + "\n")
             n_eval_written += 1
 
