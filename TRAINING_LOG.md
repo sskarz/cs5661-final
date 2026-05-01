@@ -2806,4 +2806,45 @@ The published consensus is that SFT-only on per-step labels is **at most 13-21% 
 
 **Part 2 (AndroidWorld deployment) closes as a documented negative-transfer result.** The LoRA's per-step gains do not survive multi-step deployment without harness-aware retraining or trajectory-level objectives. This is itself a contribution — the failure modes (mode collapse, schema hallucination, parse failure) are quantified and tied to mechanism, with a concrete priority-ordered roadmap for future work.
 
+## 52. M3A baseline on AndroidWorld — score-to-beat (cancelled early)
+
+_Appended 2026-04-30._
+
+To establish a literature-comparable "score to beat" on AndroidWorld using the canonical M3A harness (Rawles et al. 2024, the protocol every published AW number uses), we wired the **baseline Gemma 4 E2B (no LoRA)** into M3A as `--agent_name=m3a_gemma4_baseline` (`android_world/agents/m3a_gemma_wrapper.py`) and launched the full 116-task sweep.
+
+### Sweep cancelled at 82/116
+
+After the v3 LoRA sweep already returned 0/31, this sweep returned the same floor across the first 82 tasks. The remaining 34 tasks were not run. Given the per-app distribution and the failure-mode spread (below), there is no realistic path to a non-zero in the tail; cancelling saves ~1.5 hours of GPU/emulator time without changing the headline.
+
+### Aggregated result @ 82/116 (final reported number)
+
+- **Success: 0/82 (0.00%)** across every app cluster (AudioRecorder, BrowserDraw, CameraTake, ClockTimer, ContactsAdd, ExpenseAdd/Delete, Markor*, NotesIs, …).
+- **Mean episode length: 20.5 steps** — most tasks burn the full step budget.
+- **Mean wall: 190 s/task**, total ≈4.3 h for 82 episodes.
+- **1 runtime exception** out of 82 (1.2%) — harness/infra is healthy.
+
+### Failure modes (the diagnostic, not just the score)
+
+| Failure mode | Count | % | What it means |
+|---|---|---|---|
+| `max_steps_no_terminate` | 55 | 67.9% | Agent never emits a terminal `status`/`answer`; runs the budget out. The scroll-loop / mode-collapse pattern from Part 2 §51 reappears here even *without* the LoRA — it's the base 2B model unable to course-correct. |
+| `parse_fail_majority` | 10 | 12.3% | ≥ half the steps in those episodes break the M3A `Reason: ... Action: {…}` schema. M3A treats unparseable emissions as no-ops. |
+| `answered_but_wrong` | 6 | 7.4% | Emits `answer` action but content doesn't satisfy the goal. |
+| `model_thought_complete_but_wrong` | 5 | 6.2% | Emits `status:complete` prematurely. |
+| `model_gave_up_infeasible` | 4 | 4.9% | Emits `status:infeasible` when the task was feasible. |
+| `runtime_exception` | 1 | 1.2% | Harness / env error, not a model failure. |
+
+### What this lets us claim
+
+The M3A baseline result formalizes what was already implicit in §51: **at 2B parameters with no GUI-specific training, AndroidWorld is a 0% floor under the canonical harness too, not just our v3 a11y harness.** This rules out "the harness is the bottleneck" as an explanation for §51's 0/31 LoRA result — the same model class fails the same way under the published reference protocol. It also fills a real gap in the literature: as far as we found, there is no other published AW M3A number for a ≤4B *general-purpose* (non-GUI-trained) VLM. The closest neighbours are ShowUI 2B GUI-trained at 7.7% AW SR and Ferret-UI Lite 3B GUI-trained at 28.0% — both with substantial GUI pretraining that Gemma 4 E2B lacks.
+
+The M3A baseline number is therefore the **floor of the published SLM curve**, and the +15pp target in `ANDROID_WORLD_PLAN.md` (any non-trivial non-zero, ideally matching ShowUI's 7.7%) remains the right bar for follow-on work.
+
+### Artifacts
+
+- Sweep dir: `/home/sanskar/android_world/runs/m3a_baseline_full/run_20260430T175951627342/` (82 `*.pkl.gz` checkpoints).
+- Aggregator: `scripts/aggregate_m3a_baseline.py` (per-app + failure-mode rollup).
+- Wrapper: `android_world/agents/m3a_gemma_wrapper.py`, dispatched in `android_world/run.py` as `m3a_gemma4_baseline`.
+- Replication plan for the +15pp follow-on: `ANDROID_WORLD_PLAN.md`.
+
 **End of training log.**

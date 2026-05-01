@@ -108,7 +108,11 @@ def main() -> None:
             n_success += int(ok)
             n_with_exc += int(ep.get("exception_info") is not None)
             times.append(float(ep.get("run_time") or 0.0))
-            lengths.append(int(ep.get("episode_length") or 0))
+            _len = ep.get("episode_length")
+            try:
+                lengths.append(int(_len) if _len and _len == _len else 0)
+            except (TypeError, ValueError):
+                lengths.append(0)
             by_app[app_cluster(tt)].append(1.0 if ok else 0.0)
             if ok:
                 successes.append(tt)
