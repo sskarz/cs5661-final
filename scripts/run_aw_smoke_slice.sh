@@ -22,6 +22,10 @@ LOGDIR="$REPO/outputs/androidworld_logs"
 mkdir -p "$LOGDIR"
 
 ADAPTER=${ADAPTER:-}
+# Resolve to absolute path so the `cd "$AW"` below doesn't break it.
+if [[ -n "$ADAPTER" && "$ADAPTER" != /* ]]; then
+  ADAPTER="$REPO/$ADAPTER"
+fi
 TAG=${TAG:-aw_smoke}
 LOG="$LOGDIR/${TAG}.log"
 OUT_DIR="$HOME/android_world/runs/${TAG}"
