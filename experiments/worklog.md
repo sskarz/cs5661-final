@@ -21,6 +21,75 @@ committing GPU-hours to the full 8K-step pathZ run.
 
 ## Runs
 
+### Run 6: 300-step QLoRA on BALANCED data — full_match=22.00 (KEEP, FIRST POSITIVE)
+- Timestamp: 2026-05-01 00:30
+- What changed: rebuilt train data with `--balance-classes --per-class-target 250`
+  → 1500 rows = 250 each of click/input_text/navigate_back/open_app/scroll/wait
+  (navigate_home dropped: only 29 source rows, would replay too aggressively).
+  Trained 300 steps at lr=2e-4 (was 200/500 on imbalanced for runs 4/5).
+- Result: full=22.00 (+1.5 vs 20.50 baseline), type=50.00, parse=98.50.
+  train_loss_final=0.95 (higher than run 5's 0.74 — balanced is harder).
+- Per-type vs baseline: click full=22 (-3.2), input_text full=0 (=),
+  wait type=15.79 (+15.79), scroll type=46.67 (+33.34), open_app
+  type=91.67 (+33.34), navigate_back type=0 (-27.27).
+- Confusion: open_app 11/12 (91.7%) excellent. navigate_back 0/11 — all
+  routed to open_app/click (model conflates "go back" with "open app").
+  ~11 rows hallucinate "type_into_text_field" (not a valid M3A type).
+- Insight: **Class imbalance was the killer.** Even one epoch on
+  click-dominated training collapsed the model to predict click. With
+  balanced data, the minorities (open_app, scroll, wait) become
+  trainable. Click does drop 3pp, but the gain on minorities outweighs.
+- Next: bump steps 300→500 on balanced; see if further training cleans
+  the navigate_back-as-open_app confusion + the type_into_text_field
+  hallucinations.
+
+### Run 5: 500-step QLoRA on natural dist — full_match=13.50 (DISCARD, REGRESS)
+- Timestamp: 2026-04-30 23:50
+- What changed: 500 steps (1 epoch over 2K rows).
+- Result: full=13.50, type=48.50, parse=99.50.
+- Per-type catastrophe: click predicted 134/200 (67%), only 86 click gt
+  rows → 16/20 input_text routed to click, 7/11 navigate_back → click.
+- Insight: more training on imbalanced data = more class collapse. 200
+  steps was the "less bad" point on this curve. Recipe needs class-
+  balanced data, not more imbalanced training.
+- Next: rebuild train.jsonl with balanced classes, retry at 300 steps.
+
+### Run 4: 200-step QLoRA @ max_new=384 — full_match=18.50 (DISCARD)
+- Timestamp: 2026-04-30 23:35
+- What changed: bumped eval `max_new_tokens` 128 → 384.
+- Result: full=18.50 (vs 20.50 baseline-384), type=54.50, parse=98.50.
+- Per-type vs baseline: click full=23.6 (-1.6), open_app full=25.0 (-16.7),
+  navigate_back full=9.1 (-18.2), scroll full=20.0 (+6.7), wait full=5.3 (+5.3).
+- Insight: format compliance is now great (parse 98.5%) but **specific
+  actions regressed** — under-trained SFT damages base instruction-
+  following without yet teaching the grounded skill. Projector unlock at
+  this LR may be too aggressive at the smoke scale.
+- Next: bump steps 200→500 to push past the disruption phase.
+
+### Run 3: baseline @ max_new=384 — full_match=20.50 (KEEP, segment 1 baseline)
+- Timestamp: 2026-04-30 23:25
+- What changed: re-eval baseline at the new max_new_tokens=384 to set a
+  fair floor for the new segment.
+- Result: full=20.50 (+0.5 vs run 1), type=54.50 (+3.0), parse=100,
+  reason=100. The +0.5 is the rescued tail of generations that had been
+  truncated at 128 tokens.
+- Insight: the M3A prompt itself produces well-formatted output for ~all
+  rows on Gemma 4 E2B even zero-shot. The bar is now 20.50% to clear.
+- Next: re-run the trained adapter at the new eval length.
+
+### Run 2: 200-step QLoRA @ max_new=128 — full_match=18.50 (DISCARD)
+- Timestamp: 2026-04-30 23:10
+- What changed: 200 steps SFT, lr=2e-4, batch 1×4, lora_r=16/alpha=32,
+  projector unlocked.
+- Result: full=18.50 (vs 20.00 baseline), type=44.00, parse=78.50,
+  train_loss_final=1.08 (8.0 → 0.45 over 200 steps).
+- Insight: training mechanically converges, but eval parse rate
+  COLLAPSED from 92.5% → 78.5%. Inspecting raw preds: trained model
+  emits a long verbose CoT reason that gets truncated at max_new=128
+  before reaching the `Action:` line. Truncation, not skill regression.
+- Next: bump max_new_tokens to 384 in eval; re-baseline at the new
+  eval length so we can see the trained adapter's true full_match.
+
 ### Run 1: baseline (zero-shot, no LoRA) — full_match=20.00 (KEEP, baseline)
 - Timestamp: 2026-04-30 23:00
 - What changed: nothing — `RECIPE=baseline` to set the floor.
@@ -37,12 +106,22 @@ committing GPU-hours to the full 8K-step pathZ run.
 
 ## Key Insights
 
-- The floor is **20%** full-match, not 0% — the M3A prompt gets you
+- **The floor is ~20.5%** full-match, not 0% — the M3A prompt gets you
   surprisingly far on a pre-trained Gemma 4 E2B because its
   instruction-following is decent. The bar is therefore "clearly beat
-  20%" not "clearly beat 0%".
-- Top failure modes are schema hallucination (4.5% emit a verbose
-  action_type string) and `wait`/`scroll` class imbalance.
+  20.5%" not "clearly beat 0%".
+- **Class imbalance was the dominant failure mode at smoke scale.**
+  60% of AC-train rows are clicks; 200/500 steps of imbalanced SFT
+  collapsed the model to "predict click" for everything. Switching to
+  per-class balanced training (250 each × 6 classes) was a +6pp gain
+  in one move (15→22 between runs 5 and 6).
+- **Long verbose CoT requires longer max_new_tokens at eval** — bumping
+  default 128→384 was net-positive (no false truncation, +0.5pp on
+  baseline).
+- **Balanced training + short training is fragile** — at 300 steps,
+  model still hallucinates schema-violating action_type strings like
+  `type_into_text_field`. More training or constrained decoding may
+  clean this up.
 
 ## Next Ideas
 
