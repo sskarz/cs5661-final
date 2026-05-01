@@ -1,1 +1,5 @@
 {"type":"config","name":"pathZ-sft-smoke","metricName":"full_match","metricUnit":"%","bestDirection":"higher"}
+{"run":1,"commit":"ce09f38","metric":20.00,"metrics":{"type_match":51.50,"parse_pct":92.50,"reason_pct":94.50,"train_loss_final":null},"status":"keep","description":"baseline: zero-shot Gemma 4 E2B on M3A-format eval","timestamp":1777615570,"segment":0}
+{"run":2,"commit":"ce09f38","metric":18.50,"metrics":{"type_match":44.00,"parse_pct":78.50,"reason_pct":83.00,"train_loss_final":1.0801},"status":"discard","description":"200-step QLoRA, lr=2e-4, projector on; max_new=128 truncates verbose reasons before Action: line","timestamp":1777616676,"segment":0}
+{"type":"config","name":"pathZ-sft-smoke","metricName":"full_match","metricUnit":"%","bestDirection":"higher"}
+{"run":3,"commit":"ce09f38","metric":20.50,"metrics":{"type_match":54.50,"parse_pct":100.00,"reason_pct":100.00,"train_loss_final":null},"status":"keep","description":"baseline at max_new_tokens=384 (segment 1 floor)","timestamp":1777617065,"segment":1}

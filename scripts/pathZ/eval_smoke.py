@@ -32,7 +32,7 @@ def main() -> None:
                     default=Path("data/androidcontrol_a11y_native_v3"))
     ap.add_argument("--model", default="unsloth/gemma-4-E2B-it")
     ap.add_argument("--adapter", default=None)
-    ap.add_argument("--max-new-tokens", type=int, default=128)
+    ap.add_argument("--max-new-tokens", type=int, default=384)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--save-preds", type=Path, default=None)
     args = ap.parse_args()
