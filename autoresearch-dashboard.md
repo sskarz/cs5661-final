@@ -1,7 +1,7 @@
 # Autoresearch Dashboard: pathZ-sft-smoke
 
-**Runs:** 20 | **Kept:** 8 | **Discarded:** 12 | **Crashed:** 0
-**Best (segment 3, AW SR primary):** **20.0% (#19, +20pp vs baseline 0%)** — first positive live AW signal
+**Runs:** 28 | **Kept:** 10 | **Discarded:** 18 | **Crashed:** 0
+**Best (segment 3, AW SR primary):** **50.00% (#22)** — but 3-sample variance study (r22/r26/r28: 50/10/20) shows recipe true mean ≈26.7%, σ≈21pp; r22 was upward outlier
 **Best (segment 2, AC offline):** 23.40% (#16, +2.6 vs floor)
 
 ## Segment 0 (max_new=128 eval, 200-row eval)
@@ -67,13 +67,32 @@
 
 | # | commit | aw_SR | aw_n_ok/total | ac_full | al_full | status | description |
 |---|--------|-------|---------------|---------|---------|--------|-------------|
-| 19 | 73a20ec | **20.00%** | 2/10 | 19.40 | 5.58 | **KEEP** | AC+AL mix (1000 AC + 500 AL); CameraTakePhoto + OpenAppTaskEval ✅ |
-| 20 | 73a20ec | 0.00% | 0/10 | — | — | keep | M3A baseline floor — confirmed 0/10 |
+| 19 | 2590f55 | 20.00% | 2/10 | 19.40 | 5.58 | keep | AC+AL mix (1000 AC + 500 AL); CameraTakePhoto + OpenAppTaskEval ✅ |
+| 20 | 2590f55 | 0.00% | 0/10 | — | — | keep | M3A baseline floor — confirmed 0/10 |
+| 21 | 2590f55 | 10.00% (-10) | 1/10 | 16.00 | 5.98 | discard | + status class (250 rows from AL); status type-match still 0% |
+| 22 | 057dd31 | **50.00%** (+30) | 5/10 | 19.60 | 1.99 | **KEEP** | r19 mix + 400 steps; ClockStopWatchRunning + RecipeDeleteSingleRecipe new wins |
+| 23 | 057dd31 | 30.00% (-20) | 3/10 | 21.20 | 3.59 | discard | r22 + 500 steps; over-trained |
+| 24 | 057dd31 | 30.00% (-20) | 3/10 | 18.40 | 3.59 | discard | r22 + 350/cls (2100 rows, 0.76 epoch); under-trained |
+| 25 | 057dd31 | 20.00% (-30) | 2/10 | 17.20 | 3.19 | discard | r22 + 350/cls + 525 steps (1.0 epoch); lost both Clock tasks |
+| 26 | 057dd31 | 10.00% (-40) | 1/10 | 16.20 | 4.38 | discard | r22 verbatim + seed=2024; **REVEALS HUGE SEED VARIANCE** |
+| 27 | 057dd31 | 10.00% (-40) | 1/10 | 20.00 | 5.98 | discard | PURE-AL ablation; killed OpenAppTaskEval — AC mixing load-bearing |
+| 28 | 8a3e4b8 | 20.00% (-30) | 2/10 | 21.80 | 5.58 | discard | r22 verbatim + seed=4242 (3rd sample); confirms r22 was outlier |
 
 **Key insight from run 19**: the AC+AL mix produces +20pp live AW lift even
 though it REGRESSES on AC offline action-match (-1.4pp vs run 16) and
 fails AL action-match (full=5.58, status type-match=0%). Offline action-match
 on AC is a misleading proxy. AW success is the right north star.
+
+**Key insight from runs 26+28**: r22's 50% AW was a **positive outlier** of a
+high-variance distribution. Three samples of the *exact same recipe* with
+different seeds yield 50/10/20 → mean=26.7%, σ≈21pp. The 10-task slice is
+too small to distinguish 25% from 35% reliably. **Variance reduction
+(20-task slice) is the next priority before further recipe tuning.**
+
+**Key insight from run 27**: pure-AL training drops AW to 10% by losing
+the AC-only `open_app` action class. AC's open_app coverage (61% type-match
+in r22 vs 0% in r27) is required for the AW slice tasks that begin with
+"Open the X app". AndroidLab alone can't replace it.
 
 ## Phase 2: AndroidLab integration
 

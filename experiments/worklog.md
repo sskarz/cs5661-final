@@ -305,3 +305,26 @@ committing GPU-hours to the full 8K-step pathZ run.
 - vary response-only loss masking on/off
 - expand to 4K train rows
 - add long_press examples (currently 0; AC has none — would need synth)
+
+### Run 28: r22 recipe + seed=4242 (3rd variance sample) — aw_success_rate=20.00 (DISCARD)
+- Timestamp: 2026-05-01 13:55
+- What changed: train_smoke.py seed 3407→4242, all else identical to r22.
+- Result: AW SR=20% (2/10: ClockStopWatchRunning + NotesIsTodo). AC offline 21.80% / 56.20%, AL 5.58% — virtually identical to r22 on offline.
+- 3-sample distribution of r22-recipe: r22=50%, r26=10%, r28=20% → mean=26.67%, σ≈21pp
+- Insight: r22's 50% was a positive outlier. Recipe's true mean is ~20-30%. The 10-task AW slice has variance too wide to distinguish recipe quality at this scale. AC and AL offline metrics collapse near-deterministically (variance <1pp) — only the live AW eval is noisy.
+- Insight (corollary): seed-driven variance dominates any 5pp-class recipe improvement on this slice. Cannot tune further until variance is reduced.
+- Next: expand AW slice from 10 → 20 tasks (or run 3-seed ensemble per recipe). Until then, all recipe tweaks are noise-bound.
+
+## Key Insights (updated)
+- AC offline action-match is a misleading proxy for AW SR (run 19 vs 18).
+- Class balancing + projector unlock + lora_r=32 + 300-400 steps is the right base recipe shape.
+- AL trajectories alone are insufficient — `open_app` from AC is load-bearing (run 27).
+- The status action class never transferred — model emits 0% status type-match across all training mixes (r21, r25, r26, r27, r28). Adding status rows didn't fix it.
+- **NEW (r28)**: 10-task AW eval has σ ≈ 21pp from seed alone. Cannot reliably tune below ±20pp gap. Variance reduction is now the gating step.
+- train_loss is inversely correlated with AW SR within a recipe family (lower train_loss → worse AW). Confirmed on r22 (0.7262, 50%) vs r23 (0.6330, 30%) vs r25 (0.6181, 20%).
+
+## Next Ideas (updated)
+- **Expand AW slice 10 → 20 tasks** for tighter variance. Pick 10 more "short-baseline" tasks from the existing AW catalog.
+- **3-seed ensemble per recipe**: run each candidate at 3 seeds, report mean ± σ. Quadruples cost but resolves r22-vs-baseline ambiguity.
+- Phase-3 Gemini-distilled CoT (logged in autoresearch.ideas.md) — defer until variance is reduced.
+- max_length 4096→8192 + AndroidLab memory-field training (long-horizon item).

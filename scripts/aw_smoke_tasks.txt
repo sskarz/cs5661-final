@@ -8,3 +8,13 @@ ClockStopWatchRunning
 MarkorCreateFolder
 MarkorDeleteNote
 NotesIsTodo
+MarkorEditNote
+ClockTimerEntry
+ExpenseDeleteSingle
+MarkorDeleteNewestNote
+NotesMeetingAttendeeCount
+NotesTodoItemCount
+RecipeDeleteDuplicateRecipes
+SimpleCalendarEventsOnDate
+SimpleCalendarLocationOfEvent
+CameraTakeVideo
