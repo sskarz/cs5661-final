@@ -1,6 +1,6 @@
 # Autoresearch Dashboard: pathZ-sft-smoke
 
-**Runs:** 34 | **Kept:** 11 | **Discarded:** 23 | **Crashed:** 0
+**Runs:** 35 | **Kept:** 11 | **Discarded:** 24 | **Crashed:** 0
 **Best (segment 3, AW SR primary):** **50.00% (#22)** — but 4-sample variance study (r22/r26/r28/r29: 50/10/20/0) shows recipe true mean ≈20%, σ≈21pp; r22 was upward outlier
 **Latest 20-task slice (pure-a11y stack):** r31=10%, r32=5%, r33=10% — all 3 land within σ≈7pp.
 **Best (segment 2, AC offline):** 23.40% (#16, +2.6 vs floor)
@@ -89,6 +89,7 @@ Teacher distillation (Gemma 4 31B 4-bit) on 1500 harness-parity AC rows surfaced
 | 27 | 057dd31 | 10.00% (-40) | 1/10 | 20.00 | 5.98 | discard | PURE-AL ablation; killed OpenAppTaskEval — AC mixing load-bearing |
 | 28 | 8a3e4b8 | 20.00% (-30) | 2/10 | 21.80 | 5.58 | discard | r22 verbatim + seed=4242 (3rd sample); confirms r22 was outlier |
 | 34 | b096ce4 | n/a (no train) | n/a | n/a | n/a | discard | Teacher-distillation analysis: 96% of AC open_app rows target non-AW apps; teacher's "mismatches" are mostly correct infeasibility refusals. Distillation premise invalidated; pivoting to data filter (r35) |
+| 35 | 56002a5 | 10.00% (=) | 2/20 | 12.00 | 1.20 | discard | AW-distribution data rebuild (--aw-apps-only, --synthesize-open-app 250, AL re-included). 1750 balanced rows. **IDENTICAL tasks succeeded as r31/r33** (Clock+OpenApp). M3AA11Y eval prompt already prepends AW app inventory → contamination wasn't load-bearing for AW SR even though structurally real. Bottleneck is harness context, not data distribution. Pivoting r36 to reason-preserving history |
 
 **Key insight from run 19**: the AC+AL mix produces +20pp live AW lift even
 though it REGRESSES on AC offline action-match (-1.4pp vs run 16) and

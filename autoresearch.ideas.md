@@ -126,3 +126,56 @@ modality removes a major source of distribution noise).
 - **Add long_press / status / answer synthetic rows** to teach actions
   AC doesn't have. AndroidLab Instruction trajectories should bring
   status naturally.
+
+## r36+ harness-context backlog (user steer 2026-05-01)
+
+User principle: "the reasoning is important when paired with teacher-student
+distillation"; "we need to focus more on the harness — what context we pass
+through (past 5 actions, candidate clickable elements, compact a11y tree).
+Some actions the model never decides on doing because of the context it
+has." → reasoning stays in labels; iterate on harness context.
+
+Independent, stackable, in priority order:
+
+- **Reason-preserving history**: M3AA11Y currently emits
+  `Step N: <action_repr> -> ok; window changed`. Strip the action repr,
+  carry the model's prior `Reason:` text instead (or alongside). Direct fix
+  for navigate_back / wait collapse — those decisions are step-to-step
+  coherence problems, not perception problems. Cheapest harness change;
+  reuse existing adapter, no retrain. Implement in
+  `android_world/agents/m3a_a11y.py` history-rendering path.
+
+- **Candidate-action shortlist header**: emit per-step
+  "Available actions: click(0..N) / scroll(up|down|left|right) /
+  open_app({inventory}) / wait" rendered from the parsed a11y tree.
+  Currently the model derives the action space implicitly from the element
+  list. Making it explicit reduces verb-confusion (click→scroll,
+  click→wait, status spam). Also eval-only first; if it lifts SR,
+  retrain with the same header at train time.
+
+- **Compact a11y tree**: drop elements with empty labels, group by
+  container, mark interactive vs non-interactive, optional truncation by
+  bbox size. Shorter prompt → better attention budget for relevant
+  elements. Plus: a11y tree could be too long for the model context
+  on certain screens (untested hypothesis).
+
+- **Goal-substep planner**: at step 0, model emits numbered plan;
+  history carries it forward. Standard literature pattern for
+  long-horizon agents; directly addresses "model never plans to back
+  out of a dialog" and the navigate_back floor. Larger change, requires
+  new train-time format (synthesized plan or teacher-generated plan).
+
+- **State diff signal**: currently "window changed" is a generic
+  placeholder. Track what actually changed (new elements appeared,
+  page text changed). Real signal for whether `wait` succeeded vs needs
+  retry. Requires harness-side state tracking; cheap to implement on
+  `m3a_a11y.M3AA11Y._step_summary`.
+
+- **Dedup consecutive observations** (AppVLM trick): when two
+  consecutive a11y trees are identical, drop the duplicate from
+  training/history. Free data-quality win; orthogonal to everything
+  above. Implement in prepare_smoke_data and m3a_a11y.
+
+Off-the-table for now (per user steers): RFT/RL on-policy collection
+(AppVLM's headline lever), drop-CoT label format (user vetoed; reasoning
+is needed for teacher distillation alignment).

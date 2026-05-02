@@ -25,10 +25,31 @@ from pathlib import Path
 
 # Local helper module
 from m3a_format import (
+    HARNESS_APP_INVENTORY,
     harness_action_repr,
     pathw_to_m3a,
     render_m3a_prompt,
 )
+
+
+def _is_aw_app(name: str) -> bool:
+    """True if `name` resolves to an app in the AW harness 19-app inventory.
+
+    AC's `open_app` field is freeform and uses display names (e.g. "Chrome",
+    "Maps", "Amazon"). AW's harness can only dispatch to its closed-set
+    inventory. r34's data analysis showed 96% of AC `open_app` rows target
+    apps that DO NOT EXIST in AW; training on those teaches the student to
+    call non-existent apps. This filter keeps only AC rows whose target app
+    matches the AW inventory (case-insensitive, substring tolerant).
+    """
+    n = (name or "").strip().lower()
+    if not n:
+        return False
+    for app, _pkg in HARNESS_APP_INVENTORY:
+        a = app.lower()
+        if n == a or a in n or n in a:
+            return True
+    return False
 
 
 def _synthesize_reason(m3a_action: dict, ui_elements: list[dict]) -> str:
@@ -129,6 +150,17 @@ def main() -> None:
                     help="Emit prompts matching the M3AA11Y eval-time prompt "
                          "(indexed app inventory + det-history Step format). "
                          "Required for r33 schema-parity retrain.")
+    ap.add_argument("--aw-apps-only", action="store_true",
+                    help="Filter AC `open_app` rows to only those whose target "
+                         "app exists in the AW harness 19-app inventory. r34 "
+                         "data analysis: 96%% of AC open_app rows reference "
+                         "apps that do not exist in AW.")
+    ap.add_argument("--synthesize-open-app", type=int, default=0,
+                    help="Generate N synthetic `open_app` training rows per "
+                         "AW-inventory app (goal='Open the X app', empty UI, "
+                         "empty history, gold=open_app(X)). Adds N*19 rows "
+                         "to the open_app bucket so balance-classes has "
+                         "enough on-distribution open_app coverage.")
     args = ap.parse_args()
 
     src = Path(args.src)
@@ -206,13 +238,63 @@ def main() -> None:
         # (with replacement when the source pool is short).
         from collections import defaultdict
         buckets: dict[str, list[dict]] = defaultdict(list)
+        n_filtered_open_app = 0
         for r in train_src:
             row = _build_row(r, _history_for(r, train_by_ep),
                              harness_parity=args.harness_parity)
             if row is None:
                 continue
+            # r34 finding: 96% of AC open_app rows target apps that do not
+            # exist in AW (Amazon/Maps/Drive/Gmail/eBay/Vimeo/Edmunds/etc.).
+            # When --aw-apps-only is set, drop those rows; the model needs
+            # to learn the closed-set AW inventory, not the open-set AC one.
+            if args.aw_apps_only and row["gt_m3a"]["action_type"] == "open_app":
+                if not _is_aw_app(row["gt_m3a"].get("app_name", "")):
+                    n_filtered_open_app += 1
+                    continue
             row["_image_root"] = AC_IMG_ROOT
             buckets[row["gt_m3a"]["action_type"]].append(row)
+        if args.aw_apps_only:
+            print(f"[prep] aw_apps_only filter dropped "
+                  f"{n_filtered_open_app} AC open_app rows; kept "
+                  f"{len(buckets.get('open_app', []))}")
+
+        # Synthesize open_app rows for the closed-set AW inventory. Each
+        # synthetic row teaches the model the action format and the goal
+        # → app_name mapping; it does NOT memorize AW task templates because
+        # the goal is a generic "Open the X app" string, not an AW task name.
+        if args.synthesize_open_app > 0:
+            syn = []
+            for app, _pkg in HARNESS_APP_INVENTORY:
+                for _ in range(args.synthesize_open_app):
+                    gt = {"action_type": "open_app", "app_name": app}
+                    user_text = render_m3a_prompt(
+                        goal=f"Open the {app} app.",
+                        history="",
+                        ui_elements=[],
+                        harness_parity=args.harness_parity,
+                    )
+                    asst = (f'Reason: Open the {app} app to begin the task.\n'
+                            f'Action: {json.dumps(gt)}')
+                    syn.append({
+                        "messages": [
+                            {"role": "user", "content": [
+                                {"type": "image"},
+                                {"type": "text", "text": user_text},
+                            ]},
+                            {"role": "assistant", "content": [
+                                {"type": "text", "text": asst},
+                            ]},
+                        ],
+                        "image": None,
+                        "elements": [],
+                        "gt_m3a": gt,
+                        "_image_root": AC_IMG_ROOT,
+                        "_synthetic": True,
+                    })
+            buckets["open_app"].extend(syn)
+            print(f"[prep] synthesized {len(syn)} open_app rows "
+                  f"({args.synthesize_open_app} per AW app)")
 
         # AndroidLab mix: load the converted AndroidLab SoM rows and add to
         # the same buckets. AndroidLab covers click/input_text/scroll/
