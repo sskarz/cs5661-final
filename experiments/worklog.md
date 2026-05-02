@@ -410,3 +410,18 @@ committing GPU-hours to the full 8K-step pathZ run.
 - Insight (meta): the user's harness-context hypothesis was correct in DIRECTION but the SPECIFIC lever (carrying prior reasons in history) is wrong for this model+scale. Two iterations (r36 eval-only, r37 train+eval) both regressed by 5pp. Need a different harness lever.
 - Reverted m3a_a11y.py to r35 history rendering. prepare_smoke_data.py keeps the --history-reasons flag (off by default) for future use.
 - Next: **r38 = compact a11y tree** — drop empty-label / non-interactive UI elements at both train+eval. Tests "prompt budget is the bottleneck" hypothesis directly without touching history or reasoning. Doesn't add new content, just removes noise. Uses index-stable rendering (skip a UI element line entirely if empty-label, but preserve the index in the remaining lines so click(7) still references the same element).
+
+### Run 38: cap M3AA11Y eval history to last 3 steps — aw_SR=5.00 (DISCARD)
+- Timestamp: 2026-05-01 21:55
+- What changed: HARNESS-only eval-time (m3a_a11y.M3AA11Y now caps `history_block` to the last 3 prior steps to match training's `prior_strs[-3:]`). Retrained on v2 (no history-reasons) since r37's adapter overwrote r35's. Same recipe, different seed.
+- Result: 1/20 = 5% AW SR — IDENTICAL outcome as r36 + r37 (lost ClockStopWatchRunning, only OpenAppTaskEval succeeds). AC offline this seed: full=10 / type=47 (+6.5pp vs r35's 40.5); AL: full=4.38 (+3.2pp vs r35's 1.20) — recipe is genuinely better at offline grounding this seed but no AW lift.
+- **Critical pattern across r36/r37/r38: 3 different harness changes (add reasons eval-only, add reasons train+eval, cap history length) all regressed by 5pp from r35.** Each change touched a different lever. Each lost ClockStopWatchRunning specifically.
+- **True diagnosis: r35's "10%" was a measurement artifact.** ClockStopWatchRunning was a fragile stochastic success — the model wasn't really solving it, it was lucking into a brittle button-click sequence that worked under one specific prompt configuration. ANY change to history block format/length breaks the lucky configuration.
+- **True base capability of Gemma 4 E2B + SFT-only + text-only on AW-20 = 5%** (1 robustly-solved task = OpenAppTaskEval). The previously-celebrated 10% floor was 1 robust + 1 fragile success.
+- Implication: harness ceiling at this scale is **5%**, not 10%. The AW-15 target requires structural changes:
+  1. Bigger base model (Gemma 4 P3 ~3B or PaliGemma-3B at 4-bit, IF it fits 24GB VRAM)
+  2. Vision back on (single-screenshot at low resolution)
+  3. Much higher AL multi-step trajectory volume (drop balanced sampling, use all 6053 AL rows including longer trajectories)
+  4. Some form of on-policy data augmentation (RFT lite — vetoed but would clearly work per AppVLM)
+- AppVLM evidence: their PaliGemma-3B + vision + RFT achieves 37.8% on a curated 82-task subset; their pre-RFT base hits ~20%. Our 2B + text-only + SFT-only reaching 15% on full AW-116 looks structurally infeasible based on this comparison.
+- Next: **r39 = step up base model to PaliGemma-3B 4-bit** if it fits in 24GB. Tests model-capacity hypothesis directly. If OOM, fall back to Gemma 4 P3. Major reset on the recipe (different chat template, different processor) but warranted given the floor is structural.
