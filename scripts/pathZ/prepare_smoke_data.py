@@ -155,6 +155,13 @@ def main() -> None:
                          "app exists in the AW harness 19-app inventory. r34 "
                          "data analysis: 96%% of AC open_app rows reference "
                          "apps that do not exist in AW.")
+    ap.add_argument("--history-reasons", action="store_true",
+                    help="In harness-parity mode, also emit a `  reason: ...` "
+                         "line under each prior Step N: in the history block. "
+                         "Required to train the model to use reasons that the "
+                         "M3AA11Y harness carries through history at eval. "
+                         "r36 evidenced that adding history reasons at eval "
+                         "alone (without matching train) is net-negative.")
     ap.add_argument("--synthesize-open-app", type=int, default=0,
                     help="Generate N synthetic `open_app` training rows per "
                          "AW-inventory app (goal='Open the X app', empty UI, "
@@ -221,9 +228,19 @@ def main() -> None:
                 prior_strs.append(
                     f"Step {n}: {harness_action_repr(a)} -> ok; window changed"
                 )
+                # r37: also carry the synthetic reason for the prior action
+                # on a `  reason: ...` second line. Trains the model to
+                # attend to prior-step reasoning when planning the next
+                # action. Eval-time harness must mirror this format
+                # (m3a_a11y.M3AA11Y).
+                if args.history_reasons:
+                    prev_elements = prev.get("elements") or []
+                    prior_strs.append(
+                        f"  reason: {_synthesize_reason(a, prev_elements)}"
+                    )
             else:
                 prior_strs.append(f"Step {n}: {json.dumps(a)}")
-        return "\n".join(prior_strs[-3:])  # last 3 only
+        return "\n".join(prior_strs[-6:])  # r37: last 3 steps × 2 lines each
 
     out_train = out / "train.jsonl"
     out_eval = out / "eval.jsonl"
