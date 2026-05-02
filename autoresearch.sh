@@ -47,10 +47,16 @@ if [[ -n "${MODEL:-}" ]]; then
   MODEL_ARG="--model $MODEL"
   echo "[autoresearch] base model: $MODEL"
 fi
+MAX_STEPS_ARG=""
+if [[ -n "${MAX_STEPS:-}" ]]; then
+  MAX_STEPS_ARG="--max-steps $MAX_STEPS"
+  echo "[autoresearch] max_steps: $MAX_STEPS"
+fi
 uv run python scripts/pathZ/train_smoke.py \
     --train-jsonl "$TRAIN" \
     --output-dir "$OUT" \
     $MODEL_ARG \
+    $MAX_STEPS_ARG \
     $TEXT_ONLY_FLAG
 
 # --- 3) Eval the trained LoRA on AC-val (grounding proxy) ---
