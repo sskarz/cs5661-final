@@ -59,23 +59,46 @@ uv run python scripts/pathZ/train_smoke.py \
     $MAX_STEPS_ARG \
     $TEXT_ONLY_FLAG
 
-# --- 3) Eval the trained LoRA on AC-val (grounding proxy) ---
-echo "[autoresearch] phase=eval-ac (trained adapter)"
+# --- 3+4) Parallel eval: AC-val + AL-val. Both load E4B 4-bit (~5GB) +
+# adapter; together comfortably fit in 24GB of VRAM. Cuts wall-clock ~50%.
+echo "[autoresearch] phase=eval-ac+eval-al (parallel, trained adapter)"
+LOG_AC=/tmp/autoresearch-eval-ac.log
+LOG_AL=/tmp/autoresearch-eval-al.log
+
 uv run python scripts/pathZ/eval_smoke.py \
     --adapter "$OUT/checkpoint-final" \
     --eval-jsonl "$EVAL" \
     --save-preds outputs/pathZ_smoke_eval/trained_ac.jsonl \
     $TEXT_ONLY_FLAG \
-    | sed 's/^METRIC \([a-zA-Z_]*\)=/METRIC ac_\1=/'
+    > "$LOG_AC" 2>&1 &
+PID_AC=$!
 
-# --- 4) Eval on AL-val (trajectory proxy, closer to AW distribution) ---
 EVAL_AL=data/pathZ/smoke/eval_al.jsonl
+PID_AL=""
 if [[ -f "$EVAL_AL" ]]; then
-  echo "[autoresearch] phase=eval-al (trained adapter)"
   uv run python scripts/pathZ/eval_smoke.py \
       --adapter "$OUT/checkpoint-final" \
       --eval-jsonl "$EVAL_AL" \
       --save-preds outputs/pathZ_smoke_eval/trained_al.jsonl \
       $TEXT_ONLY_FLAG \
-      | sed 's/^METRIC \([a-zA-Z_]*\)=/METRIC al_\1=/'
+      > "$LOG_AL" 2>&1 &
+  PID_AL=$!
+fi
+
+wait "$PID_AC"
+EXIT_AC=$?
+grep '^METRIC ' "$LOG_AC" | sed 's/^METRIC \([a-zA-Z_]*\)=/METRIC ac_\1=/' || true
+if [[ $EXIT_AC -ne 0 ]]; then
+  echo "[autoresearch] eval-ac failed (exit $EXIT_AC); tail:"
+  tail -40 "$LOG_AC"
+fi
+
+if [[ -n "$PID_AL" ]]; then
+  wait "$PID_AL"
+  EXIT_AL=$?
+  grep '^METRIC ' "$LOG_AL" | sed 's/^METRIC \([a-zA-Z_]*\)=/METRIC al_\1=/' || true
+  if [[ $EXIT_AL -ne 0 ]]; then
+    echo "[autoresearch] eval-al failed (exit $EXIT_AL); tail:"
+    tail -40 "$LOG_AL"
+  fi
 fi

@@ -29,10 +29,11 @@ M3A_PROMPT_PREFIX = (
     '- Scroll: {"action_type": "scroll", "direction": "<up|down|left|right>"}\n'
     '- Open an app: {"action_type": "open_app", "app_name": "<name>"}\n'
     '- Wait for screen update: {"action_type": "wait"}\n'
-    # r43: status removed from vocab. Premature `status:complete` was the
-    # dominant AW failure mode in r41 (plan distillation made it worse).
-    # AW success scoring fires post-trajectory based on env state, not
-    # agent assertion. Harness max_steps cap is the only termination.
+    # r48: restore status. r43-r47 dropped it but model couldn't terminate
+    # → over-acted on tasks like "take 1 photo" (took 5). Now reintroduced
+    # so the model can signal "task complete" when env state matches goal.
+    '- Mark task complete: {"action_type": "status", "goal_status": "complete"}\n'
+    '- Mark task infeasible: {"action_type": "status", "goal_status": "infeasible"}\n'
     '- Answer the user: {"action_type": "answer", "text": "<answer>"}\n'
     "Respond with EXACTLY the format:\nReason: <one sentence>\n"
     'Action: {"action_type": ...}\n'
