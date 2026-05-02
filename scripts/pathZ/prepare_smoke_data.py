@@ -88,7 +88,8 @@ def _synthesize_reason(m3a_action: dict, ui_elements: list[dict]) -> str:
 
 
 def _build_row(src_row: dict, history_text: str,
-               harness_parity: bool = False) -> dict | None:
+               harness_parity: bool = False,
+               compact_a11y: bool = False) -> dict | None:
     """Convert one Path-W src row → one M3A-format SFT row."""
     try:
         gt_pathw = json.loads(src_row["messages"][1]["content"][0]["text"])
@@ -101,7 +102,8 @@ def _build_row(src_row: dict, history_text: str,
     goal = src_row.get("goal", "")
     user_text = render_m3a_prompt(goal=goal, history=history_text,
                                   ui_elements=elements,
-                                  harness_parity=harness_parity)
+                                  harness_parity=harness_parity,
+                                  compact_a11y=compact_a11y)
     reason = _synthesize_reason(gt_m3a, elements)
     asst_text = f'Reason: {reason}\nAction: {json.dumps(gt_m3a)}'
 
@@ -162,6 +164,12 @@ def main() -> None:
                          "M3AA11Y harness carries through history at eval. "
                          "r36 evidenced that adding history reasons at eval "
                          "alone (without matching train) is net-negative.")
+    ap.add_argument("--compact-a11y", action="store_true",
+                    help="Drop UI elements with empty labels from the rendered "
+                         "prompt. Indices preserved (skip lines, don't "
+                         "renumber) so click(N) semantics unchanged. r39: "
+                         "tests prompt-budget hypothesis without touching "
+                         "history block.")
     ap.add_argument("--synthesize-open-app", type=int, default=0,
                     help="Generate N synthetic `open_app` training rows per "
                          "AW-inventory app (goal='Open the X app', empty UI, "
@@ -258,7 +266,7 @@ def main() -> None:
         n_filtered_open_app = 0
         for r in train_src:
             row = _build_row(r, _history_for(r, train_by_ep),
-                             harness_parity=args.harness_parity)
+                             harness_parity=args.harness_parity, compact_a11y=args.compact_a11y)
             if row is None:
                 continue
             # r34 finding: 96% of AC open_app rows target apps that do not
@@ -384,7 +392,7 @@ def main() -> None:
                 if n_train_written >= args.n_train:
                     break
                 row = _build_row(r, _history_for(r, train_by_ep),
-                                 harness_parity=args.harness_parity)
+                                 harness_parity=args.harness_parity, compact_a11y=args.compact_a11y)
                 if row is None:
                     continue
                 f.write(json.dumps(row) + "\n")
@@ -396,7 +404,7 @@ def main() -> None:
             if n_eval_written >= args.n_eval:
                 break
             row = _build_row(r, _history_for(r, val_by_ep),
-                             harness_parity=args.harness_parity)
+                             harness_parity=args.harness_parity, compact_a11y=args.compact_a11y)
             if row is None:
                 continue
             row["_image_root"] = AC_IMG_ROOT

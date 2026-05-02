@@ -101,6 +101,7 @@ def render_m3a_prompt(
     history: str,
     ui_elements: list[dict],
     harness_parity: bool = False,
+    compact_a11y: bool = False,
 ) -> str:
     """Render the M3A-style action-selection prompt as a single user-text block.
 
@@ -126,7 +127,18 @@ def render_m3a_prompt(
     for e in ui_elements:
         eid = e.get("id")
         label = (e.get("label") or "").strip()
-        lines.append(f'  UI element {eid}: {{"index": {eid}, "text": "{label}"}}')
+        # r39 compact-a11y: drop pure-container elements (empty label).
+        # Index is preserved; the elements list is just sparser.
+        # Click(N) still references the same element since indices come
+        # from the source list, not the rendered position.
+        if compact_a11y and not label:
+            continue
+        # r39 BUG FIX: trailing newline so element lines aren't jammed
+        # together. Pre-r39 train prompts had all elements on one line
+        # because lines were joined with "" not "\n". Eval has been using
+        # `+ '\n'` per element via m3a._generate_ui_elements_description_list,
+        # so this restores train/eval parity on elements section.
+        lines.append(f'  UI element {eid}: {{"index": {eid}, "text": "{label}"}}\n')
     lines.append("\nNow output an action from the above list.\n")
     lines.append('Reason: ...\nAction: {"action_type":...}\n\nYour Answer:\n')
     return "".join(lines)

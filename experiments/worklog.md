@@ -425,3 +425,12 @@ committing GPU-hours to the full 8K-step pathZ run.
   4. Some form of on-policy data augmentation (RFT lite — vetoed but would clearly work per AppVLM)
 - AppVLM evidence: their PaliGemma-3B + vision + RFT achieves 37.8% on a curated 82-task subset; their pre-RFT base hits ~20%. Our 2B + text-only + SFT-only reaching 15% on full AW-116 looks structurally infeasible based on this comparison.
 - Next: **r39 = step up base model to PaliGemma-3B 4-bit** if it fits in 24GB. Tests model-capacity hypothesis directly. If OOM, fall back to Gemma 4 P3. Major reset on the recipe (different chat template, different processor) but warranted given the floor is structural.
+
+### Run 39: fix UI elements newline bug — aw_SR=10.00 (DISCARD on metric, KEPT as fix)
+- Timestamp: 2026-05-01 22:30
+- What changed: BUG FIX in `m3a_format.render_m3a_prompt`. The function joined lines with `"".join()` (empty string) so all UI element lines were concatenated WITHOUT newlines. 25+ elements jammed on one line in train prompts. Eval-side `m3a._generate_ui_elements_description_list` correctly appends `\n` per element. **Train/eval format mismatch since r33** (harness_parity introduction). Fix: append trailing `\n` per element line in render_m3a_prompt.
+- Result: 2/20 = 10% AW SR (Clock + OpenApp). Recovers r35 baseline. Bug fix did NOT lift past 10% but proves r36/r37/r38's 5% was driven by harness changes themselves, not data quality bugs.
+- Insight: **Structural ceiling for Gemma 4 E2B + SFT-only + text-only is 10% AW-20** (within recipe noise). Cleanest harness lever (newline fix) shipped, no SR lift. Confirms harness-side improvements within this paradigm are exhausted.
+- Bug fix is keeper-tier infrastructure (eliminates real train/eval mismatch) even though it doesn't move SR. Future runs will have a clean baseline to compare against.
+- Next: **r40 = step up base model to Gemma 4 E4B (4-bit Unsloth quant)**. Same architecture/template/processor as E2B — drop-in upgrade. ~2× parameters. Tests if model capacity is the bottleneck. Same v5 data, same recipe, same harness. ~12 min train.
+- After r40, if E4B doesn't break 10%, the remaining structural lever is vision (re-enable image input) since the only published recipe approaching 15%+ AW SR (AppVLM) is vision-based.

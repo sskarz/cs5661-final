@@ -1,7 +1,7 @@
 # Autoresearch Dashboard: pathZ-sft-smoke
 
-**Runs:** 38 | **Kept:** 11 | **Discarded:** 27 | **Crashed:** 0
-**True base capability**: 5% AW-20 SR (1 robustly-solved task = OpenAppTaskEval). r31/r33/r35's "10%" was 1 robust + 1 fragile (ClockStopWatchRunning brittle to ANY history-block change). r36/r37/r38 confirm the structural floor.
+**Runs:** 39 | **Kept:** 11 | **Discarded:** 28 | **Crashed:** 0
+**True base capability (Gemma 4 E2B, SFT-only, text-only)**: 10% AW-20 SR (Clock + OpenApp). r39 newline-fix recovered the r35 baseline — confirms r36/r37/r38's 5% was driven by harness changes themselves, NOT data bugs. Structural ceiling reached within paradigm. Next: bigger base model (E4B 4-bit).
 **Best (segment 3, AW SR primary):** **50.00% (#22)** — but 4-sample variance study (r22/r26/r28/r29: 50/10/20/0) shows recipe true mean ≈20%, σ≈21pp; r22 was upward outlier
 **Latest 20-task slice (pure-a11y stack):** r31=10%, r32=5%, r33=10% — all 3 land within σ≈7pp.
 **Best (segment 2, AC offline):** 23.40% (#16, +2.6 vs floor)
@@ -94,6 +94,7 @@ Teacher distillation (Gemma 4 31B 4-bit) on 1500 harness-parity AC rows surfaced
 | 36 | b4d87b8 | 5.00% (-5) | 1/20 | =r35 | =r35 | discard | Reason-preserving history (HARNESS-only, r35 adapter unchanged). Append model prior `Reason:` text on `  reason:` line under each `Step N:` summary. **LOST ClockStopWatchRunning** (succeeded r31/r33/r35). Net-negative: prompt distribution shift dilutes attention. To unlock the harness-context lever properly, train-time format must change in lockstep. Pivoting r37 to candidate-action shortlist header (additive, no history restructure) |
 | 37 | 328c176 | 5.00% (=r36) | 1/20 | 11.00 | 1.20 | discard | r37 = r36 + matching train. prepare_smoke_data --history-reasons emits same `  reason:` line under each `Step N:` in train prompts. Aligns train+eval distribution. **IDENTICAL FAILURE as r36** — RULES OUT distribution shift hypothesis. Real cause: model uses prior reasons as distraction signal, can't disambiguate own-prior-reasoning from user goal, gets stuck looping (max-steps on stopwatch). At 2B+text-only scale, in-context reasoning has a sharp toxicity cliff. Pivoting r38 to compact a11y tree (drop empty-label elements) — prompt-budget hypothesis without touching reasoning |
 | 38 | 11c0a21 | 5.00% (=r36) | 1/20 | 10.00 | 4.38 | discard | History cap at 3 (eval-only, matches train's prior_strs[-3:]). 3rd consecutive harness change to land at 5% (lost ClockStopWatchRunning). **TRUE FLOOR REVEALED: 5% (1 robust task = OpenAppTaskEval)**. r35's 10% was 1 robust + 1 fragile (Clock brittle to ANY history-block change). Structural ceiling for Gemma 4 E2B + SFT-only + text-only. r39 needs to step up to bigger base model OR re-enable vision OR step up multi-step training data volume |
+| 39 | 50188ff | 10.00% (=r35) | 2/20 | 13.50 | 1.59 | discard (metric); KEPT (fix) | Discovered + fixed pre-existing bug in render_m3a_prompt (joined element lines with empty string instead of newline). Train/eval format mismatch present since r33. Bug fix recovers Clock+OpenApp baseline; doesn't lift past r35 ceiling. Bug fix is keeper-tier infra; metric is discard. r36/r37/r38's 5% was driven by harness changes (not data bugs); r39 disambiguated. Pivoting r40 to Gemma 4 E4B 4-bit base model upgrade |
 
 **Key insight from run 19**: the AC+AL mix produces +20pp live AW lift even
 though it REGRESSES on AC offline action-match (-1.4pp vs run 16) and
