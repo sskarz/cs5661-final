@@ -24,7 +24,11 @@ import random
 from pathlib import Path
 
 # Local helper module
-from m3a_format import pathw_to_m3a, render_m3a_prompt
+from m3a_format import (
+    harness_action_repr,
+    pathw_to_m3a,
+    render_m3a_prompt,
+)
 
 
 def _synthesize_reason(m3a_action: dict, ui_elements: list[dict]) -> str:
@@ -62,7 +66,8 @@ def _synthesize_reason(m3a_action: dict, ui_elements: list[dict]) -> str:
     return "Perform the chosen action."
 
 
-def _build_row(src_row: dict, history_text: str) -> dict | None:
+def _build_row(src_row: dict, history_text: str,
+               harness_parity: bool = False) -> dict | None:
     """Convert one Path-W src row → one M3A-format SFT row."""
     try:
         gt_pathw = json.loads(src_row["messages"][1]["content"][0]["text"])
@@ -74,7 +79,8 @@ def _build_row(src_row: dict, history_text: str) -> dict | None:
     elements = src_row.get("elements") or []
     goal = src_row.get("goal", "")
     user_text = render_m3a_prompt(goal=goal, history=history_text,
-                                  ui_elements=elements)
+                                  ui_elements=elements,
+                                  harness_parity=harness_parity)
     reason = _synthesize_reason(gt_m3a, elements)
     asst_text = f'Reason: {reason}\nAction: {json.dumps(gt_m3a)}'
 
@@ -119,6 +125,10 @@ def main() -> None:
     ap.add_argument("--include-status", action="store_true",
                     help="If set, also include a `status` class in the "
                          "balanced train mix (AndroidLab-only).")
+    ap.add_argument("--harness-parity", action="store_true",
+                    help="Emit prompts matching the M3AA11Y eval-time prompt "
+                         "(indexed app inventory + det-history Step format). "
+                         "Required for r33 schema-parity retrain.")
     args = ap.parse_args()
 
     src = Path(args.src)
@@ -165,11 +175,22 @@ def main() -> None:
             try:
                 a = pathw_to_m3a(json.loads(
                     prev["messages"][1]["content"][0]["text"]))
-                if a is not None:
-                    prior_strs.append(
-                        f"Step {prev.get('step_index')}: {json.dumps(a)}")
             except Exception:
-                pass
+                continue
+            if a is None:
+                continue
+            n = prev.get("step_index", 0) + 1
+            if args.harness_parity:
+                # Mirror M3AA11Y's deterministic per-step summary:
+                #   Step N: <action_repr> -> ok; window changed
+                # AC trajectories are gold so the executor feedback is `ok`;
+                # the delta is a generic placeholder — the goal is to teach
+                # the model the FORMAT, not pixel-accurate state diffs.
+                prior_strs.append(
+                    f"Step {n}: {harness_action_repr(a)} -> ok; window changed"
+                )
+            else:
+                prior_strs.append(f"Step {n}: {json.dumps(a)}")
         return "\n".join(prior_strs[-3:])  # last 3 only
 
     out_train = out / "train.jsonl"
@@ -186,7 +207,8 @@ def main() -> None:
         from collections import defaultdict
         buckets: dict[str, list[dict]] = defaultdict(list)
         for r in train_src:
-            row = _build_row(r, _history_for(r, train_by_ep))
+            row = _build_row(r, _history_for(r, train_by_ep),
+                             harness_parity=args.harness_parity)
             if row is None:
                 continue
             row["_image_root"] = AC_IMG_ROOT
@@ -262,7 +284,8 @@ def main() -> None:
             for r in train_src:
                 if n_train_written >= args.n_train:
                     break
-                row = _build_row(r, _history_for(r, train_by_ep))
+                row = _build_row(r, _history_for(r, train_by_ep),
+                                 harness_parity=args.harness_parity)
                 if row is None:
                     continue
                 f.write(json.dumps(row) + "\n")
@@ -273,7 +296,8 @@ def main() -> None:
         for r in val_src:
             if n_eval_written >= args.n_eval:
                 break
-            row = _build_row(r, _history_for(r, val_by_ep))
+            row = _build_row(r, _history_for(r, val_by_ep),
+                             harness_parity=args.harness_parity)
             if row is None:
                 continue
             row["_image_root"] = AC_IMG_ROOT

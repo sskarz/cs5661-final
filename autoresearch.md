@@ -1,12 +1,36 @@
-# Autoresearch: pathZ M3A-format SFT smoke (AndroidLab-faithful)
+# Autoresearch: Gemma 4 E2B → ≥15% on AndroidWorld-116
 
 ## Objective
 
-Reproduce the **AndroidLab XML-mode SFT recipe** (Xu et al. 2024,
-arXiv:2410.24024) at smoke scale on Gemma 4 E2B, in M3A's exact prompt
-and action vocabulary. AndroidLab reports 2.17 → 23.91% on the
-AndroidLab benchmark using SFT alone; the bar for our pathZ plan is
-beating the M3A AW baseline by ≥15pp absolute.
+**Ship a Gemma 4 E2B agent that scores ≥15% success rate on the full
+AndroidWorld benchmark (116 tasks, M3A harness)** without cheating.
+
+The 15% bar is the success criterion. Pure-prompt baseline floor on
+AW-116 was 0% (see `FUTURE_WORK.md`). Best smoke result so far is
+r22 at 50% on a curated AW-10 slice but variance studies (r22/r26/r28/r29
+= 50/10/20/0%) showed that slice is too noisy to distinguish recipes.
+The ship gate is full AW-116, not AW-10 or AW-20.
+
+### Workflow gate
+
+1. **Iterate on AW-20 smoke** (curated 20-task slice via M3AA11Y harness)
+   to ratchet recipes cheaply. Target: ≥15% AW-20 SR with low variance.
+2. **When AW-20 SR ≥ 15%** on a recipe, run the **full AW-116** to
+   confirm the smoke generalises. This is the ship gate.
+3. **No cheating**: do not curate AW-116 task selection, do not train on
+   AW task templates, do not contaminate the train set with AW
+   instructions, do not relax the harness's success criterion.
+
+### Lineage of attempts
+
+- Phase 1 (AC-only SFT): plateaued at +2.6pp AC offline, no AW lift.
+- Phase 2 (AC+AL mix, M3A schema): r22 50% on AW-10 outlier, true mean
+  ~25% with σ≈21pp. Pure-a11y r31 = 10% on AW-20.
+- Phase 3 (current): teacher distillation (r34) — Gemma 4 31B 4-bit
+  generates blind, kept rows have either matched verb+arg or 2nd-pass
+  salvaged reason for matched verb. Goal: replace synthetic one-line
+  reasons with model-grade rationales. Off-policy notes in
+  `scripts/pathZ/distill_teacher.py`.
 
 ### Phase 1 — infra validation (DONE through run 17)
 
@@ -41,16 +65,16 @@ showing the recipe is positive transfer at smoke scale.
 
 ## Metrics
 
-- **Primary**: `full_match` — % of eval rows where the model emits a
-  parseable `Reason: ... Action: {...}` AND both action_type and the
-  primary grounding arg (index / direction / app_name) match gt.
-  **Higher is better.**
-- **Secondary**:
-  - `type_match` — % where action_type alone matches gt (looser, signals
-    whether the model picked the right *kind* of action).
-  - `parse_pct` — % rows that produced a parseable `Action: {...}`.
-  - `reason_pct` — % rows with a `Reason:` prefix.
-  - `train_loss_final` — final training loss (training runs only).
+- **Primary**: `aw_success_rate` — fraction of AW tasks the agent
+  completes per the harness `task.is_successful()` check.
+  **Higher is better.** Measured on AW-20 smoke slice each iter; on full
+  AW-116 only when AW-20 ≥ 15%.
+- **Secondary** (cheap signals computed each iter):
+  - `aw_n_ok` / `aw_total` — raw success counts.
+  - `ac_full_match` — AC-val offline action-match (grounding proxy).
+  - `al_full_match` — AndroidLab-val offline action-match (trajectory proxy).
+  - `train_loss_final` — final training loss.
+  - `parse_pct` / `reason_pct` — emission well-formedness.
   - `type_match_<at>` — per-action-type breakdowns when ≥5 rows.
 
 ## How to Run
@@ -90,10 +114,21 @@ Smoke data (cached after first build):
 ## Constraints
 
 - One RTX 4090, 24 GB VRAM.
-- No full AW benchmark runs from this loop.
-- Single iteration must finish in ≤ ~10 min wall to keep the loop tight.
-- The smoke must use M3A's exact action vocabulary so anything we ship
-  here is directly compatible with the AW M3A wrapper at deploy time.
+- Full AW-116 runs are **gated**: only triggered when an AW-20 smoke
+  scores ≥15% on the same recipe. AW-116 takes ~6h on this hardware so
+  is not the iteration loop, only the ship test.
+- AW-20 smoke iter target: ≤ ~15 min wall.
+- Harness is no longer fixed to M3A. You may experiment with new
+  harnesses (e.g. swapping in a different agent loop, prompt structure,
+  history representation, action vocabulary) as long as success is still
+  measured by the AndroidWorld task `is_successful()` check. New
+  harnesses should live alongside `m3a_a11y.py` in
+  `android_world/agents/` and be wired through `run.py`. The action
+  vocabulary the model emits must still be the AW-compatible one (or
+  losslessly mappable to it) so the harness can dispatch actions.
+- **No cheating**: no AW-task-template mining into train data, no
+  selecting which AW tasks to score on after the fact, no relaxing of
+  harness success criteria.
 
 ## What's Been Tried
 

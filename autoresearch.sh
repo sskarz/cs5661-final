@@ -14,7 +14,7 @@ REPO=/home/sanskar/Documents/Github/cs5661-final
 cd "$REPO"
 
 # --- 1) Ensure smoke data is built ---
-TRAIN=data/pathZ/smoke/train.jsonl
+TRAIN=${TRAIN:-data/pathZ/smoke/train.jsonl}
 EVAL=data/pathZ/smoke/eval.jsonl
 if [[ ! -f "$TRAIN" || ! -f "$EVAL" ]]; then
   echo "[autoresearch] smoke data not built; running prepare_smoke_data.py"

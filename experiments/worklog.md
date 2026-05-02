@@ -21,6 +21,13 @@ committing GPU-hours to the full 8K-step pathZ run.
 
 ## Runs
 
+### Run 33: schema-parity retrain (AC prompts match M3AA11Y eval format) — aw_SR=10.00 (DISCARD)
+- Timestamp: 2026-05-01 17:30
+- What changed: prepare_smoke_data.py grew a `--harness-parity` flag. AC training prompts now prepend the indexed app inventory + render history as `Step N: <action_repr> -> ok; window changed` (the same form M3AA11Y emits at eval time). Same recipe otherwise: 1500 AC-only rows, --text-only, max_length=16384, 400 steps.
+- Result: 2/20 = 10% AW SR. IDENTICAL tasks to r31 (ClockStopWatchRunning + OpenAppTaskEval). AC offline DROPPED full=18.6→9.5 (-9pp), type=44.6→23.0 (-22pp). BUT input_text type-match SURGED 4.65→25.00 (+20pp); the model rebalanced toward AW-relevant verbs (click/input_text/open_app dominant; scroll/wait/navigate_back collapsed to 0%).
+- Insight: schema parity is format-neutral, not load-bearing. The harness patches are NOT dormant due to train/eval mismatch — they're dormant because the base model lacks the planning ability to use them. Pure (state, action) imitation has hit a ceiling at ~10% AW SR for our 2B base. Confirms user's earlier intuition: scaffolding cannot compensate for model capability.
+- Next: r34 — teacher distillation. Use Gemma 4 31B (4-bit, same Unsloth pipeline as student) to generate (Reason, Action) trajectories on AC rows, train student on distilled rationales.
+
 ### Run 32: same r31 adapter + harness patches (no-op widening, status/answer guards, tolerant parser) — aw_SR=5.00 (DISCARD)
 - Timestamp: 2026-05-01 16:55
 - What changed: kept r31's adapter; patched M3AA11Y harness — `_NAV_ACTIONS` widened to include scroll/input_text, `status(complete)` guard refusing on no-change, `answer(...)` guard requiring at least one open_app+click, tolerant JSON parser (brace-balance walking, truncation repair), `max_new_tokens` 256→384.
@@ -354,3 +361,20 @@ committing GPU-hours to the full 8K-step pathZ run.
 - **3-seed ensemble per recipe**: run each candidate at 3 seeds, report mean ± σ. Quadruples cost but resolves r22-vs-baseline ambiguity.
 - Phase-3 Gemini-distilled CoT (logged in autoresearch.ideas.md) — defer until variance is reduced.
 - max_length 4096→8192 + AndroidLab memory-field training (long-horizon item).
+
+### Run 34: teacher distillation (Gemma 4 31B 4-bit) — INVALIDATED PRE-TRAIN (DISCARD)
+- Timestamp: 2026-05-01 19:15
+- What changed: built `scripts/pathZ/distill_teacher.py`. Loaded Gemma 4 31B 4-bit, ran blind generation on 1500 harness-parity AC rows. Bucketed teacher emissions: full action match (kept), type-match (2nd-pass salvage prompt asking teacher to justify the gold action), full mismatch (discarded). Final: match=152 (10.13%), salvaged=342 (22.80%), mismatch=1005 (67%). Total kept=494 (32.93%).
+- Result: NO STUDENT TRAINING RUN. Pre-train analysis revealed two structural data problems that invalidate the distillation premise:
+  1. **AC training data is 96% off-distribution from AW.** Of 250 AC `open_app` rows, only 10 (4%) target an app in the AW 19-app inventory (Files/Markor/Joplin/Broccoli/Pro Expense/Camera/Clock/Simple Calendar Pro/Simple SMS Messenger/Contacts/Audio Recorder/Chrome/Settings/OsmAnd/Retro Music/Simple Draw Pro/Tasks/VLC/OpenTracks). The other 240 target real consumer apps (Amazon, Khan Academy, Maps, Drive, Gmail, eBay, Booking.com, ZARA, Decathlon, Vimeo, Edmunds, Myntra, etc.) that DO NOT EXIST in the AW emulator. We were training the student to call `open_app: Edmunds` knowing the deployment harness can never satisfy that action — the only correct action there is `status: infeasible`.
+  2. **Teacher's "mismatches" are mostly correct refusals.** 281/329 erroneous teacher status emits were `infeasible` — the teacher correctly identified the missing-from-inventory app and refused. The salvage step would force the student to learn post-hoc rationalizations of actions even the strong teacher refused as infeasible. This would actively poison the student.
+- Per-class teacher full-match: click=34.5%, scroll=11.2%, navigate_back=2.4%, open_app=10.0%, input_text=0%, wait=3.4%. The teacher fails on the same classes the student fails on, for the same reason: text-only a11y prompt loses spatial info (scroll/wait), goal-substep history (navigate_back), and the `wait` label is an annotation quirk of AC (a11y tree IS populated, smart agent correctly clicks the visible target).
+- Insight: **this is a data + harness problem, not a model-capacity problem.** Teacher distillation cannot fix structural input deficiencies. Distillation is only useful when the teacher reliably handles cases the student fails on; here the teacher fails on the same cases.
+- Insight (corollary): all prior r19-r33 runs were trained on the same off-distribution AC data. The `open_app` confusion they exhibited at AW eval was the model loyally reproducing what we taught it.
+- Tooling kept: `distill_teacher.py` with `--resume` flag. Useful for a future run on properly filtered data.
+- Next: **r35 — rebuild train data**. (a) Filter AC to rows whose actions reference only AW-inventory apps, plus the non-open_app classes (click/scroll/input_text/wait/navigate_back) which are AW-app-agnostic. (b) Re-include all 6053 AndroidLab rows (collected on the AW emulator with the same app inventory — naturally on-distribution). (c) Re-balance classes from this filtered pool. Drop the teacher distillation salvage path entirely. Train student on this v2 dataset; eval AW-20.
+
+## Key Insights (updated 2026-05-01 r34)
+- **Off-distribution training data is the dominant problem.** AC trajectories were collected on real consumer Android phones with a long tail of real apps. AW is a curated 19-app emulator. 96% of AC `open_app` rows reference apps that don't exist in the deployment environment. Every model trained on this dataset learns to call non-existent apps; in deployment the wrapper has no recourse but to fail. This explains the entire r19-r33 plateau independent of recipe choices.
+- **AndroidLab is the right distribution.** AL trajectories were collected on the AW emulator with the AW app inventory. Our previous runs that mixed in 50% AL (r19, r22) were the only ones to ever exceed 20% AW SR — that wasn't coincidence.
+- **Distillation is conditional.** Teacher distillation only helps when the teacher reliably handles cases the student fails on. Here the teacher and student share the same input-distribution failure modes. Need to fix the data first.

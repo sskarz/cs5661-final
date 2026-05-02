@@ -4,6 +4,10 @@ Converts AndroidControl-v3 (Path W schema) rows to M3A's exact prompt and
 action vocabulary, which is what `m3a_gemma_wrapper.GemmaMultimodalWrapper`
 sees at AW eval time. Also provides an action-match scorer that consumes
 M3A-format actions on both sides.
+
+When `harness_parity=True` is passed to `render_m3a_prompt`, the prompt
+matches the M3AA11Y eval-time prompt: indexed app inventory block + the
+deterministic-history Step format. Used for r33's schema-parity retrain.
 """
 from __future__ import annotations
 
@@ -33,30 +37,98 @@ M3A_PROMPT_PREFIX = (
 )
 
 
-def render_m3a_prompt(goal: str, history: str, ui_elements: list[dict]) -> str:
+# Mirrors `m3a_a11y.APP_INVENTORY` so train-time and eval-time prompts share
+# the same indexed app list. If you edit one, edit the other.
+HARNESS_APP_INVENTORY: list[tuple[str, str]] = [
+    ("Files", "com.android.documentsui"),
+    ("Markor", "net.gsantner.markor"),
+    ("Joplin", "net.cozic.joplin"),
+    ("Broccoli", "com.flauschcode.broccoli"),
+    ("Pro Expense", "com.arduia.expense"),
+    ("Camera", "com.android.camera2"),
+    ("Clock", "com.google.android.deskclock"),
+    ("Simple Calendar Pro", "com.simplemobiletools.calendar.pro"),
+    ("Simple SMS Messenger", "com.simplemobiletools.smsmessenger"),
+    ("Contacts", "com.google.android.contacts"),
+    ("Audio Recorder", "com.dimowner.audiorecorder"),
+    ("Chrome", "com.android.chrome"),
+    ("Settings", "com.android.settings"),
+    ("OsmAnd", "net.osmand"),
+    ("Retro Music", "code.name.monkey.retromusic"),
+    ("Simple Draw Pro", "com.simplemobiletools.draw.pro"),
+    ("Tasks", "org.tasks"),
+    ("VLC", "org.videolan.vlc"),
+    ("OpenTracks", "de.dennisguse.opentracks"),
+]
+
+
+def render_inventory_block() -> str:
+    lines = ["Installed apps (use the display name with open_app):"]
+    for i, (name, pkg) in enumerate(HARNESS_APP_INVENTORY):
+        lines.append(f'  {i}: "{name}"  ({pkg})')
+    return "\n".join(lines)
+
+
+def harness_action_repr(action: dict) -> str:
+    """Mirror `m3a_a11y._action_repr`. If you edit one, edit the other."""
+    at = action.get("action_type", "?")
+    if at in ("click", "long_press"):
+        return f'{at}(index={action.get("index")})'
+    if at == "input_text":
+        text = action.get("text", "")
+        if len(text) > 40:
+            text = text[:37] + "..."
+        return f'input_text(index={action.get("index")}, text={text!r})'
+    if at == "open_app":
+        return f'open_app({action.get("app_name", "?")!r})'
+    if at == "scroll":
+        return f'scroll(direction={action.get("direction", "?")})'
+    if at == "navigate_back":
+        return "navigate_back()"
+    if at == "navigate_home":
+        return "navigate_home()"
+    if at == "wait":
+        return "wait()"
+    if at == "status":
+        return f'status({action.get("goal_status", "?")})'
+    if at == "answer":
+        return f'answer(text={action.get("text", "")!r})'
+    return at
+
+
+def render_m3a_prompt(
+    goal: str,
+    history: str,
+    ui_elements: list[dict],
+    harness_parity: bool = False,
+) -> str:
     """Render the M3A-style action-selection prompt as a single user-text block.
 
-    Mirrors the AW-eval-time prompt that the model will see through the
-    GemmaMultimodalWrapper, but compact (no long Guidance section).
-
-    `ui_elements` is the row's `elements` list: each dict has `id`, `bbox`,
-    `label`. We render in the same order as the legend the runtime emits.
+    Default mode mirrors the original eval-time prompt. With
+    `harness_parity=True` the prompt matches what `m3a_a11y.M3AA11Y` builds
+    at eval time: an indexed installed-app inventory block prepended,
+    `history` rendered as deterministic `Step N: <repr> -> <feedback>`
+    lines (caller is responsible for that formatting).
     """
     if not history:
         history = "You just started, no action has been performed yet."
-    lines = [
-        M3A_PROMPT_PREFIX,
-        f"\nThe current user goal/request is: {goal}\n",
-        f"Here is a history of what you have done so far:\n{history}\n",
+    lines: list[str] = []
+    if harness_parity:
+        lines.append(render_inventory_block())
+        lines.append("\n\n")
+    lines.append(M3A_PROMPT_PREFIX)
+    lines.append(f"\nThe current user goal/request is: {goal}\n")
+    lines.append(f"Here is a history of what you have done so far:\n{history}\n")
+    lines.append(
         "Here is the list of UI elements visible on screen "
-        "(numeric indexes match the labeled screenshot):\n",
-    ]
+        "(numeric indexes match the labeled screenshot):\n"
+    )
     for e in ui_elements:
         eid = e.get("id")
         label = (e.get("label") or "").strip()
         lines.append(f'  UI element {eid}: {{"index": {eid}, "text": "{label}"}}')
     lines.append("\nNow output an action from the above list.\n")
-    lines.append("Reason: ...\nAction: {\"action_type\":...}\n\nYour Answer:\n")
+    lines.append('Reason: ...\nAction: {"action_type":...}\n\nYour Answer:\n')
     return "".join(lines)
 
 
