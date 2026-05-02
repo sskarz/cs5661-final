@@ -89,8 +89,18 @@ def _synthesize_reason(m3a_action: dict, ui_elements: list[dict]) -> str:
 
 def _build_row(src_row: dict, history_text: str,
                harness_parity: bool = False,
-               compact_a11y: bool = False) -> dict | None:
-    """Convert one Path-W src row → one M3A-format SFT row."""
+               compact_a11y: bool = False,
+               plan: str | None = None,
+               is_step0: bool | None = None) -> dict | None:
+    """Convert one Path-W src row → one M3A-format SFT row.
+
+    r41 plan support:
+      - `plan`: teacher-generated 3-5 step plan for this row's goal.
+      - `is_step0`: True if the row is the first step in its trajectory
+        (history empty). Step 0 rows train the model to EMIT the plan
+        at the top of its assistant text. Step 1+ rows train the model
+        to USE a plan that's been re-injected in the user prompt.
+    """
     try:
         gt_pathw = json.loads(src_row["messages"][1]["content"][0]["text"])
     except Exception:
@@ -100,12 +110,25 @@ def _build_row(src_row: dict, history_text: str,
         return None
     elements = src_row.get("elements") or []
     goal = src_row.get("goal", "")
-    user_text = render_m3a_prompt(goal=goal, history=history_text,
+    # If this row gets a plan AND it's not step 0, prepend the plan to
+    # the user goal text. This mirrors what the harness will inject at
+    # eval time after parsing the model's step-0 emission.
+    plan_in_goal = ""
+    if plan and is_step0 is False:
+        plan_in_goal = f"Plan from step 0:\n{plan}\n\n"
+    user_text = render_m3a_prompt(goal=plan_in_goal + goal,
+                                  history=history_text,
                                   ui_elements=elements,
                                   harness_parity=harness_parity,
                                   compact_a11y=compact_a11y)
     reason = _synthesize_reason(gt_m3a, elements)
-    asst_text = f'Reason: {reason}\nAction: {json.dumps(gt_m3a)}'
+    asst_body = f'Reason: {reason}\nAction: {json.dumps(gt_m3a)}'
+    # For step 0 rows with a plan, the assistant emits Plan first.
+    # Train the model to ALWAYS emit the plan at step 0.
+    if plan and is_step0 is True:
+        asst_text = f'Plan:\n{plan}\n\n{asst_body}'
+    else:
+        asst_text = asst_body
 
     return {
         "messages": [
@@ -170,6 +193,19 @@ def main() -> None:
                          "renumber) so click(N) semantics unchanged. r39: "
                          "tests prompt-budget hypothesis without touching "
                          "history block.")
+    ap.add_argument("--plans-jsonl", type=Path, default=None,
+                    help="Path to teacher-generated plans (output of "
+                         "distill_plans.py). When set, augment AL training "
+                         "rows: step 0 emits Plan: header; step 1+ has "
+                         "`Plan from step 0:` re-injected in user prompt. "
+                         "M3AA11Y harness must mirror this format at eval.")
+    ap.add_argument("--plan-align-filter", action="store_true",
+                    help="When using plans, drop AL trajectories whose "
+                         "teacher-plan step 1 does not align with the "
+                         "trajectory's step-0 gold action. Currently checks "
+                         "open_app: plan must reference the same app name "
+                         "and start with 'Open'. Smaller training set, "
+                         "cleaner step-0 supervision.")
     ap.add_argument("--synthesize-open-app", type=int, default=0,
                     help="Generate N synthetic `open_app` training rows per "
                          "AW-inventory app (goal='Open the X app', empty UI, "
@@ -325,13 +361,116 @@ def main() -> None:
         # the same buckets. AndroidLab covers click/input_text/scroll/
         # navigate_back/status (no wait/open_app — those are AC-only).
         al_buckets: dict[str, list[dict]] = defaultdict(list)
-        if args.androidlab_jsonl is not None:
+        # r41 plan augmentation: load teacher-generated plans by goal.
+        plans_by_goal: dict[str, str] = {}
+        if args.plans_jsonl is not None and args.plans_jsonl.exists():
+            with open(args.plans_jsonl) as f:
+                for line in f:
+                    p = json.loads(line)
+                    if not p.get("infeasible"):
+                        plans_by_goal[p["goal"]] = p["plan"]
+            print(f"[prep] loaded {len(plans_by_goal)} teacher plans from "
+                  f"{args.plans_jsonl}")
+
+        def _augment_al_with_plan(r: dict) -> dict:
+            """Inject r41 plan into an AL row's prompt + assistant text.
+
+            AL rows are pre-built (have full M3A prompt). We extract the
+            goal, look up the plan, then either:
+              - step 0 (history_len == 0): assistant emits Plan: + reason+action
+              - step 1+: prompt has `Plan from step 0:` injected before goal
+            If no plan available for the goal, return row unchanged.
+            """
+            user_text = r["messages"][0]["content"][1]["text"]
+            marker = "The current user goal/request is: "
+            idx = user_text.find(marker)
+            if idx < 0:
+                return r
+            goal_end = user_text.find("\n", idx + len(marker))
+            goal = user_text[idx + len(marker):goal_end].strip()
+            plan = plans_by_goal.get(goal)
+            if not plan:
+                return r
+            step0 = (r.get("history_len", 0) == 0)
+            new_r = json.loads(json.dumps(r))  # deep copy
+            if step0:
+                # Modify assistant: prepend Plan
+                asst = new_r["messages"][1]["content"][0]["text"]
+                new_r["messages"][1]["content"][0]["text"] = (
+                    f"Plan:\n{plan}\n\n{asst}"
+                )
+            else:
+                # Modify user prompt: inject Plan from step 0 before goal
+                new_user = (user_text[:idx] +
+                            f"Plan from step 0:\n{plan}\n\n" +
+                            user_text[idx:])
+                new_r["messages"][0]["content"][1]["text"] = new_user
+            return new_r
+
+        # r41 alignment filter: pre-pass to identify aligned goals.
+        # Only enforce for trajectories whose step-0 action is open_app
+        # (most common, easiest to align). For other start-action types,
+        # default to "aligned" (no filter).
+        aligned_goals: set[str] = set()
+        misaligned_goals: set[str] = set()
+        if plans_by_goal and args.plan_align_filter and args.androidlab_jsonl:
+            marker = "The current user goal/request is: "
             with open(args.androidlab_jsonl) as f:
                 for line in f:
                     r = json.loads(line)
+                    if r.get("history_len", -1) != 0:
+                        continue
+                    user_text = r["messages"][0]["content"][1]["text"]
+                    idx = user_text.find(marker)
+                    if idx < 0:
+                        continue
+                    end = user_text.find("\n", idx + len(marker))
+                    g = user_text[idx + len(marker):end].strip()
+                    plan = plans_by_goal.get(g)
+                    if not plan:
+                        continue
+                    a0 = r.get("gt_m3a", {})
+                    if a0.get("action_type") != "open_app":
+                        # Don't filter non-open_app starts
+                        aligned_goals.add(g)
+                        continue
+                    target_app = (a0.get("app_name") or "").strip().lower()
+                    plan_first = plan.split("\n", 1)[0].lower()
+                    # "1. Open the Markor app" — needs both "open" and target app
+                    if "open" in plan_first and target_app and target_app in plan_first:
+                        aligned_goals.add(g)
+                    else:
+                        misaligned_goals.add(g)
+            print(f"[prep] plan alignment filter: {len(aligned_goals)} aligned, "
+                  f"{len(misaligned_goals)} misaligned goals "
+                  f"(of {len(plans_by_goal)} total plans)")
+
+        if args.androidlab_jsonl is not None:
+            n_planned = 0
+            n_filtered = 0
+            with open(args.androidlab_jsonl) as f:
+                for line in f:
+                    r = json.loads(line)
+                    if plans_by_goal:
+                        # Look up goal for filter check
+                        ut = r["messages"][0]["content"][1]["text"]
+                        m = "The current user goal/request is: "
+                        i = ut.find(m)
+                        gend = ut.find("\n", i + len(m)) if i >= 0 else -1
+                        g = ut[i + len(m):gend].strip() if i >= 0 else ""
+                        if (args.plan_align_filter and g in misaligned_goals):
+                            n_filtered += 1
+                            continue
+                        before = r["messages"][1]["content"][0]["text"]
+                        r = _augment_al_with_plan(r)
+                        if r["messages"][1]["content"][0]["text"] != before:
+                            n_planned += 1
                     al_buckets[r["gt_m3a"]["action_type"]].append(r)
             print(f"[prep] AndroidLab pool sizes: "
                   f"{ {k: len(v) for k, v in al_buckets.items()} }")
+            if plans_by_goal:
+                print(f"[prep] augmented {n_planned} AL rows with plans; "
+                      f"filtered {n_filtered} rows from misaligned trajectories")
         # Drop classes whose source pool is much smaller than the target —
         # otherwise we replay the same handful of rows many times, which
         # overfits to that class. Keep replay factor ≤ ~2.5x.

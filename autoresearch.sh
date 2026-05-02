@@ -42,9 +42,15 @@ fi
 # --- 2) Train ---
 echo "[autoresearch] phase=train"
 rm -rf "$OUT"
+MODEL_ARG=""
+if [[ -n "${MODEL:-}" ]]; then
+  MODEL_ARG="--model $MODEL"
+  echo "[autoresearch] base model: $MODEL"
+fi
 uv run python scripts/pathZ/train_smoke.py \
     --train-jsonl "$TRAIN" \
     --output-dir "$OUT" \
+    $MODEL_ARG \
     $TEXT_ONLY_FLAG
 
 # --- 3) Eval the trained LoRA on AC-val (grounding proxy) ---

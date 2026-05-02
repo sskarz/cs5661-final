@@ -1,7 +1,8 @@
 # Autoresearch Dashboard: pathZ-sft-smoke
 
-**Runs:** 39 | **Kept:** 11 | **Discarded:** 28 | **Crashed:** 0
-**True base capability (Gemma 4 E2B, SFT-only, text-only)**: 10% AW-20 SR (Clock + OpenApp). r39 newline-fix recovered the r35 baseline — confirms r36/r37/r38's 5% was driven by harness changes themselves, NOT data bugs. Structural ceiling reached within paradigm. Next: bigger base model (E4B 4-bit).
+**Runs:** 44 | **Kept:** 12 | **Discarded:** 32 | **Crashed:** 0
+**Best (recipe): r43 — E4B + plan distillation + drop status, 10% AW-20 with NEW task solved (CameraTakeVideo, first time across r19-r44)**.
+**True base capability**: 10% AW-20 SR remains the ceiling. Across r35→r44 trying data fix, harness changes, bigger model, plan distillation, status drop, and no-op removal, AW-20 has not exceeded 2/20. Trajectory analysis (r43): real failure modes are model grounding errors (wrong app selection, out-of-range indices, loop-clicking) — model-capacity issues, not harness. Next: r42-style teacher rollouts on AL tasks for higher-quality on-distribution multi-step training data.
 **Best (segment 3, AW SR primary):** **50.00% (#22)** — but 4-sample variance study (r22/r26/r28/r29: 50/10/20/0) shows recipe true mean ≈20%, σ≈21pp; r22 was upward outlier
 **Latest 20-task slice (pure-a11y stack):** r31=10%, r32=5%, r33=10% — all 3 land within σ≈7pp.
 **Best (segment 2, AC offline):** 23.40% (#16, +2.6 vs floor)

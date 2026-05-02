@@ -179,3 +179,165 @@ Independent, stackable, in priority order:
 Off-the-table for now (per user steers): RFT/RL on-policy collection
 (AppVLM's headline lever), drop-CoT label format (user vetoed; reasoning
 is needed for teacher distillation alignment).
+
+## r41+ plan-distillation design (drafted 2026-05-02)
+
+User-approved direction following r40 launch. Goal: address goal-decomposition
+gap revealed by r39 failure analysis (premature `status:complete` after
+opening app, model can't sequence multi-step actions).
+
+### Key insight from r36/r37
+At 2B (E2B), in-context reasoning has a sharp toxicity cliff — model
+can't disambiguate own-prior-thoughts from user goal text.
+**Mitigation**: scope reasoning to PLAN (set once at step 0, role-clear,
+in dedicated prompt slot) rather than per-step Reason in history. Plan
+is task-scoped, not step-by-step.
+
+### Design
+
+**At step 0** (no history):
+```
+User: <goal>
+       <inventory>
+       <elements>
+Assistant: Plan:
+  1. Open the X app.
+  2. Navigate to Y.
+  3. Perform Z action.
+  4. Confirm.
+Reason: First step is to open X.
+Action: {"action_type":"open_app","app_name":"X"}
+```
+
+**At step 1+** (harness re-injects plan):
+```
+User: <goal>
+       Plan from step 0:
+       1. Open the X app.
+       2. ...
+       History:
+       Step 1: open_app(X) -> ok
+       <elements>
+Assistant: Reason: Plan step 2: navigate to Y. I see Y at index 5.
+Action: {"action_type":"click","index":5}
+```
+
+### Data sources (cheapest first)
+
+**Option A: AndroidLab plan augmentation (PREFERRED)**
+- AL has 6053 multi-step trajectories with goal + action sequences
+- Send each unique AL goal to teacher (Gemma 4 31B 4-bit) → get plan
+- Augment AL training rows with the plan; gold actions stay AL's
+- Reuses existing trajectories; only need teacher to generate plans
+
+**Option B: Synthesize AW-style task descriptions**
+- Templated goals over 19 AW apps ("Delete X from Y", "Find Z in W")
+- Teacher generates plan + first action for each
+- New trajectory data, more on-distribution but no real action sequences
+- DO NOT use actual AW task names (contamination risk)
+
+Start with Option A. If AL plan distillation lifts SR, augment with Option B.
+
+### Pipeline
+
+1. `scripts/pathZ/distill_plans.py`:
+   - Load AL trajectories, dedup by goal
+   - For each unique goal, send to teacher with AW inventory
+   - Teacher emits 3-5 step plan
+   - Output: `data/pathZ/al_plans.jsonl` mapping goal → plan
+   - ~6053 unique goals (or fewer after dedup); ~3-5s/teacher call → ~5-8 hours
+   - Could use existing distill_teacher.py scaffolding
+
+2. `prepare_smoke_data.py` --use-plans flag:
+   - Look up plan for each AL row's goal
+   - At step 0: prepend `Plan: ...` to assistant text
+   - At step 1+: inject `Plan from step 0:` block in user prompt above history
+
+3. `m3a_a11y.py` plan handling:
+   - At step 0: parse Plan from model's emission, store in self.plan
+   - At step 1+: inject self.plan into action_prompt above history block
+
+### Risks
+
+- Teacher's plan may be wrong (no validation against ground truth actions)
+- Student may overfit to plan format; lose flexibility
+- Plan adds prompt budget; may dilute attention on UI elements
+- 2B model still might be too small to USE the plan even if shown one
+  (E4B is the right base model to test this on)
+
+### Gating rule
+
+- Only build this pipeline if r40 (E4B) shows AW SR ≥ 10% (recovers
+  baseline), proving capacity is the lever.
+- If r40 stays at 5-10%, plan distillation alone unlikely to lift past
+  the structural ceiling.
+- If r40 ≥ 15%, plan distillation may be the multiplier to break 25%+.
+
+## r42 (conditional): teacher rollouts on AndroidLab tasks
+
+User-approved conditional plan: trigger if r41 doesn't lift AW-20 SR
+past 10% floor. Source clean on-distribution data without AW
+contamination by collecting teacher trajectories on AL tasks (NOT AW).
+
+**Why AL not AW**: AW-116 is the held-out test set; touching it (even
+"hold out 20") leaks task templates because AW tasks are parameterized
+families. AL's 138-task benchmark is disjoint from AW-116 task families
+and runs on the same emulator, so trajectories are naturally on-AW-
+distribution without overlap.
+
+**Scope estimate**:
+1. AL emulator setup (if not already running) — separate Android image,
+   ~1 day
+2. Teacher inference loop wrapper — Gemma 4 31B 4-bit running through
+   M3AA11Y agent on AL tasks; record per-step (UI state, action, reason)
+   ~half day
+3. Trajectory→training-row converter — already partially exists in
+   convert_androidlab_som.py
+4. Train + eval cycle — same as r35-r41
+~ Total: 1-2 days engineering before any training
+
+**Risks**:
+- Teacher may fail many AL tasks (per r34, teacher is also confused by
+  text-only context). Failed trajectories aren't useful for SFT.
+- AL 138 tasks × ~10 steps avg = ~1380 trajectory steps. Smaller than
+  the 6053 AL Instruct rows we already have, but on-policy (real teacher
+  rollouts) rather than off-policy (recorded human trajectories).
+- Cost: teacher inference ~3s/step × ~1380 steps = ~70 min, but only if
+  the loop completes. With max_steps=30 per task and many failures, real
+  cost likely 4-6 hours.
+
+**Gating**:
+- Only build if r41 lands at ≤ 12% AW-20 (no meaningful lift over r40)
+- Skip if r41 ≥ 15% (already shipping)
+
+## r43 (conditional): drop status emission
+
+User-approved if r41 ≤10% AW-20 (confirms premature `status:complete`
+is the dominant failure mode in r41).
+
+**Diagnosis**: r41's plan-distilled training rewards the model for
+emitting `status: complete` as the last plan step. The model
+generalizes this and emits status:complete on AW tasks BEFORE the
+task is actually finished — the harness scores false. Same trajectory
+shape across all 18 r41 failures.
+
+**Fix**: drop `status` from action vocab entirely. AW's success check
+fires post-trajectory based on env state, not on agent assertion.
+The harness max_steps cap (default 30) becomes the only termination.
+
+**Changes**:
+1. `m3a_format.py M3A_PROMPT_PREFIX`: remove the two status lines
+   (Mark task complete / infeasible)
+2. `m3a_a11y.py`: clip emissions where action_type=='status' to a
+   no-op (e.g. `wait`) at the executor; log but don't terminate
+3. `prepare_smoke_data.py`: drop status class from balance set
+4. AL plan postprocess: strip the final `X. status: complete` step
+   from each teacher-generated plan (so the plan doesn't contain a
+   directive to emit status)
+5. Retrain E4B + plans on v7 data; eval AW-20
+
+**Risk**: model may stop performing actions late in trajectories (not
+sure what to do once "done"). max_steps cap absorbs this. Worst case
+SR drops to 0 (everything timing out without success), which would
+mean status drop wasn't the dominant problem and we need the verifier
+approach (option 3 from premature-termination playbook).

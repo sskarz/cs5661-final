@@ -434,3 +434,28 @@ committing GPU-hours to the full 8K-step pathZ run.
 - Bug fix is keeper-tier infrastructure (eliminates real train/eval mismatch) even though it doesn't move SR. Future runs will have a clean baseline to compare against.
 - Next: **r40 = step up base model to Gemma 4 E4B (4-bit Unsloth quant)**. Same architecture/template/processor as E2B — drop-in upgrade. ~2× parameters. Tests if model capacity is the bottleneck. Same v5 data, same recipe, same harness. ~12 min train.
 - After r40, if E4B doesn't break 10%, the remaining structural lever is vision (re-enable image input) since the only published recipe approaching 15%+ AW SR (AppVLM) is vision-based.
+
+### Run 41: plan distillation (E4B + teacher plans) — aw_SR=5.00 (DISCARD)
+- Timestamp: 2026-05-02 06:30
+- What changed: built distill_plans.py (Gemma 4 31B 4-bit teacher generates 3-5 step plans for each unique AL goal); 595 plans / 166 infeasible (teacher correctly refused goals using non-AW apps). prepare_smoke_data --plans-jsonl --plan-align-filter augments AL training rows: step 0 emits Plan: header in assistant text; step 1+ has "Plan from step 0:" injected in user prompt before goal. m3a_a11y mirrors at eval (parses Plan from step-0 emission, re-injects in step 1+). v6 train data, E4B base.
+- Result: 1/20 = 5% AW SR. Lost ClockStopWatchRunning. Only OpenApp succeeds. **HUGE offline lifts though**: AL full_match doubled 3.19→6.37 (highest of any run); AC navigate_back FIRST EVER non-zero (0→18.18); AC wait 5→63; AC scroll 27→40.
+- Insight: plans WORK at the offline action-grounding level (model emits much more diverse verbs) but PREMATURE `status:complete` from the plans kills task completion. Every plan ends with "X. status: complete"; model generalizes and emits status:complete on AW tasks before they're actually done.
+- Next: r43 = drop status from action vocab + harness suppresses status emission; force harness to terminate via max_steps or no-op-auto-declare only.
+
+### Run 43: drop status emission entirely — aw_SR=10.00 (KEEP, structural progress)
+- Timestamp: 2026-05-02 06:50
+- What changed: removed `status` from M3A_PROMPT_PREFIX action vocab; m3a_a11y now suppresses any status emission (logs feedback, no termination). Plans rebuilt to strip trailing `X. status: complete` step (al_plans_no_status.jsonl). v7 train data drops status class entirely (1500 rows, 6-class balance). E4B base.
+- Result: 2/20 = 10% AW SR. Same metric as r39/r40 BUT **NEW TASK SOLVED**: CameraTakeVideo (first time across r19-r43). ClockStopWatchRunning lost (was a fragile success across r31-r40). OpenAppTaskEval still solved.
+- Insight (DEEP): the success on CameraTakeVideo wasn't strategic model competence — analysis of trajectories showed the model just kept clicking the shutter button until the harness no-op-auto-declare terminated the trajectory, and the env state happened to have a saved video → success. Same fragility as Clock in r35 but in a different direction.
+- Insight: r43 status drop genuinely freed the model from the premature-termination pattern. **Plan distillation produces a structurally more diverse-acting agent** but its actions still aren't precise enough to actually complete tasks reliably.
+- Trajectory-level failures (per dump analysis): (a) wrong app selection — opened "Files" instead of "Markor"; (b) out-of-range indices — input_text(15) when only 0-14; (c) loop-clicking same wrong element until no-op. These are model-grounding errors, not harness errors.
+- Next: r44 = remove the no-op auto-declare (test whether more steps help)
+
+### Run 44: remove no-op auto-declare in M3AA11Y — aw_SR=0.00 (DISCARD, lesson)
+- Timestamp: 2026-05-02 07:25
+- What changed: m3a_a11y.M3AA11Y no longer self-terminates after 2 consecutive nav-class no-ops; model runs until max_steps cap unconditionally. Reused r43 adapter, harness-only.
+- Result: 0/20 = 0% AW SR. INCLUDING OpenAppTaskEval (which had succeeded in EVERY run since r19).
+- **CRITICAL FINDING: the no-op auto-declare is LOAD-BEARING for AW scoring.** It was the only mechanism that terminated trajectories at intermediate states (the env-side success check fires at termination). Without it, max_steps termination leaves the env in an over-acted state — camera continuously recording (no saved file), app navigated past the success state, etc. The HOW of termination changes the env's final state and thus the success check outcome.
+- Insight: harness termination strategy is real infrastructure. Cannot remove or simplify without a smarter terminator that detects success earlier. The current mechanism is "terminate when stuck (no-ops)", which approximates "terminate when state hasn't changed for a while" — a weak heuristic but apparently sufficient for some tasks.
+- Reverted m3a_a11y.py to r43 no-op behavior.
+- Next: r45 = pivot to r42 (teacher rollouts on AL tasks). The harness levers are exhausted; the bottleneck is model grounding (wrong app, hallucinated indices). Need higher-quality on-distribution multi-step trajectory training data.
