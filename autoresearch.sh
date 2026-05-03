@@ -52,11 +52,23 @@ if [[ -n "${MAX_STEPS:-}" ]]; then
   MAX_STEPS_ARG="--max-steps $MAX_STEPS"
   echo "[autoresearch] max_steps: $MAX_STEPS"
 fi
+DATA_DIR_ARG=""
+if [[ -n "${DATA_DIR:-}" ]]; then
+  DATA_DIR_ARG="--data-dir $DATA_DIR"
+  echo "[autoresearch] image data-dir: $DATA_DIR"
+fi
+LR_ARG=""
+if [[ -n "${LR:-}" ]]; then
+  LR_ARG="--lr $LR"
+  echo "[autoresearch] lr: $LR"
+fi
 uv run python scripts/pathZ/train_smoke.py \
     --train-jsonl "$TRAIN" \
     --output-dir "$OUT" \
     $MODEL_ARG \
     $MAX_STEPS_ARG \
+    $DATA_DIR_ARG \
+    $LR_ARG \
     $TEXT_ONLY_FLAG
 
 # --- 3+4) Parallel eval: AC-val + AL-val. Both load E4B 4-bit (~5GB) +

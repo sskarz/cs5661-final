@@ -26,7 +26,7 @@ DEFAULTS = {
     "warmup_steps": 12,
     "lora_r": 32,
     "lora_alpha": 64,
-    "max_length": 16384,
+    "max_length": 32768,
     "train_projector": True,
     "seed": 3407,
 }
@@ -66,18 +66,48 @@ def main() -> None:
     from PIL import Image
     from torch.utils.data import Dataset
     import torch
-    from unsloth import FastVisionModel
+    from unsloth import FastVisionModel, FastLanguageModel
     from unsloth.trainer import UnslothVisionDataCollator
     from trl import SFTConfig, SFTTrainer
 
-    model, processor = FastVisionModel.from_pretrained(
-        args.model, load_in_4bit=True, use_gradient_checkpointing="unsloth",
-    )
+    # r53: when training with images, force eager attention. sdpa + bf16
+    # + image tokens triggers NaN on first forward pass (numerical overflow
+    # in attention scores). Eager is slower but numerically stable.
+    fp_kwargs = dict(load_in_4bit=True, use_gradient_checkpointing="unsloth")
+    if not args.text_only:
+        fp_kwargs["attn_implementation"] = "eager"
+    # r60: support text-only models that have no vision tower (e.g. Qwen3-4B).
+    # Try FastVisionModel first (handles vision-capable models like Gemma 4
+    # and Qwen2.5-VL); fall back to FastLanguageModel for pure text models.
+    is_text_only_model = False
+    try:
+        model, processor = FastVisionModel.from_pretrained(args.model, **fp_kwargs)
+    except Exception as e:
+        if "image" in str(e).lower() or "vision" in str(e).lower():
+            print(f"[smoke-train] FastVisionModel failed ({e}); using FastLanguageModel")
+        is_text_only_model = True
+        model, tokenizer = FastLanguageModel.from_pretrained(args.model, **fp_kwargs)
+        processor = tokenizer
+        # FastLanguageModel returns just (model, tokenizer); fake a processor
+        # interface that the existing code uses.
+        if not hasattr(processor, "tokenizer"):
+            processor.tokenizer = tokenizer
 
-    modules_to_save = ["embedding_projection"] if args.train_projector else []
+    # r53 fix: when training with images (text_only=False), keep vision
+    # tower + projector FROZEN. With them unfrozen + LoRA at lr=2e-4,
+    # forward pass on first image step explodes to NaN. Standard vision
+    # SFT recipe: vision tower frozen, projector frozen, text-side LoRA
+    # learns to attend to image embeddings.
+    vision_mode = not args.text_only
+    if vision_mode:
+        modules_to_save = []  # no embedding_projection unfreeze
+    else:
+        modules_to_save = ["embedding_projection"] if args.train_projector else []
     peft_kwargs = dict(
-        finetune_vision_layers=True, finetune_language_layers=True,
-        finetune_attention_modules=True, finetune_mlp_modules=True,
+        finetune_vision_layers=not vision_mode,
+        finetune_language_layers=True,
+        finetune_attention_modules=True,
+        finetune_mlp_modules=True,
         r=args.lora_r, lora_alpha=args.lora_alpha,
         lora_dropout=0, bias="none", random_state=args.seed,
         target_modules="all-linear",
@@ -86,6 +116,8 @@ def main() -> None:
         peft_kwargs["modules_to_save"] = modules_to_save
     model = FastVisionModel.get_peft_model(model, **peft_kwargs)
     FastVisionModel.for_training(model)
+    if vision_mode:
+        print(f"[smoke-train] vision mode: vision tower + projector FROZEN")
 
     # Lazy-image dataset, same shape as Run L's trainer.
     class SmokeDataset(Dataset):
@@ -104,13 +136,18 @@ def main() -> None:
             at = next(c["text"] for c in row["messages"][1]["content"]
                       if c["type"] == "text")
             user_content = [{"type": "text", "text": ut}]
+            images = []
             if not args.text_only:
                 # Per-row _image_root takes precedence (lets us mix data
                 # sources rooted in different directories — AC + AndroidLab).
                 img_root = Path(row.get("_image_root") or self.root)
                 img = Image.open(img_root / row["image"]).convert("RGB")
-                user_content.append({"type": "image", "image": img})
-            return {
+                # r53: prepend image placeholder in user content so the chat
+                # template emits image markers, but keep the actual PIL image
+                # at row level so the collator passes it to processor.images=.
+                user_content.insert(0, {"type": "image", "image": img})
+                images.append(img)
+            sample = {
                 "messages": [
                     {"role": "user", "content": user_content},
                     {"role": "assistant", "content": [
@@ -118,18 +155,43 @@ def main() -> None:
                     ]},
                 ]
             }
+            if images:
+                sample["images"] = images
+            return sample
 
     dataset = SmokeDataset(args.train_jsonl, args.data_dir)
     print(f"[smoke-train] {len(dataset)} train rows")
 
     # Mask everything before the assistant turn so loss only fires on
-    # Reason+Action tokens. Markers same as Run L (Gemma 4 chat template).
-    collator = UnslothVisionDataCollator(
-        model, processor,
-        train_on_responses_only=True,
-        instruction_part="<|turn>user\n",
-        response_part="<|turn>model\n",
-    )
+    # Reason+Action tokens. r57: pick markers per model family
+    # (Gemma uses <|turn>user/model, Qwen uses <|im_start|>user/assistant).
+    if "qwen" in args.model.lower():
+        instruction_part = "<|im_start|>user\n"
+        response_part = "<|im_start|>assistant\n"
+        print(f"[smoke-train] using Qwen ChatML markers for response masking")
+    else:
+        instruction_part = "<|turn>user\n"
+        response_part = "<|turn>model\n"
+    # r60: try vision collator (works for Gemma 4 / Qwen2.5-VL / Qwen3.5-4B
+    # which carry vision modules). Falls back to trl's response-only
+    # collator for pure text models like Qwen3-4B.
+    try:
+        collator = UnslothVisionDataCollator(
+            model, processor,
+            train_on_responses_only=True,
+            instruction_part=instruction_part,
+            response_part=response_part,
+        )
+    except TypeError as e:
+        if "image models" in str(e):
+            from trl import DataCollatorForCompletionOnlyLM
+            print(f"[smoke-train] text-only model detected; using trl response-only collator")
+            collator = DataCollatorForCompletionOnlyLM(
+                response_template=response_part,
+                tokenizer=processor.tokenizer if hasattr(processor, "tokenizer") else processor,
+            )
+        else:
+            raise
 
     sft_kwargs = dict(
         per_device_train_batch_size=args.batch_size,
@@ -154,8 +216,15 @@ def main() -> None:
         dataloader_num_workers=2,
         dataloader_pin_memory=True,
     )
+    # r53: pass full processor (not just tokenizer) when training with
+    # images so the vision pipeline is wired up. With tokenizer-only,
+    # the chat template emitted 264 image-marker tokens per row but the
+    # input_ids contained 0 image_token_ids → mismatch error.
+    trainer_processing_class = (
+        processor if not args.text_only else processor.tokenizer
+    )
     trainer = SFTTrainer(
-        model=model, processing_class=processor.tokenizer,
+        model=model, processing_class=trainer_processing_class,
         data_collator=collator,
         train_dataset=dataset,
         args=SFTConfig(**sft_kwargs),

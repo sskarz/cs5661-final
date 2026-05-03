@@ -140,18 +140,40 @@ def _action_to_dict(a) -> dict | None:
         return None
 
 
-def _trajectory_record(app_name: str, goal: str, agent) -> dict:
-    """Extract per-step training data from agent.history."""
+def _trajectory_record(app_name: str, goal: str, agent,
+                       img_dir: Path | None = None,
+                       traj_idx: int = 0) -> dict:
+    """Extract per-step training data from agent.history.
+
+    r53: if `img_dir` is given, write each step's pre-action screenshot
+    to `img_dir/<traj_idx>_<step>.png` and record the relative path in
+    the step record under `image`.
+    """
+    from PIL import Image as _PIL_Image
+    import numpy as _np
     steps = []
     for i, h in enumerate(agent.history):
-        steps.append({
+        rec = {
             "step": i,
             "action_prompt": h.get("action_prompt"),
             "action_output": h.get("action_output"),
             "action_reason": h.get("action_reason"),
             "action_output_json": _action_to_dict(h.get("action_output_json")),
             "summary": h.get("summary"),
-        })
+        }
+        if img_dir is not None:
+            pixels = h.get("raw_screenshot")
+            if pixels is not None:
+                arr = pixels if isinstance(pixels, _np.ndarray) else _np.asarray(pixels)
+                img = _PIL_Image.fromarray(arr).convert("RGB")
+                # Downscale to keep PNGs small (target ~640px wide)
+                if img.width > 640:
+                    new_h = int(img.height * 640 / img.width)
+                    img = img.resize((640, new_h), _PIL_Image.LANCZOS)
+                rel = f"{traj_idx}_{i}.png"
+                img.save(img_dir / rel, optimize=True)
+                rec["image"] = rel
+        steps.append(rec)
     return {"app": app_name, "goal": goal, "steps": steps}
 
 
@@ -168,12 +190,19 @@ def main():
                     help="only run goal synthesis (pass 1)")
     ap.add_argument("--resume", action="store_true",
                     help="append to existing files; skip already-rolled (app,goal) pairs")
+    ap.add_argument("--save-screenshots", action="store_true",
+                    help="r53: save raw_screenshot per step to <out_dir>/screenshots/ "
+                    "and add `image` field per step in trajectory record")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     goals_p = out_dir / "goals.jsonl"
     traj_p = out_dir / "trajectories.jsonl"
+    img_dir = out_dir / "screenshots" if getattr(args, "save_screenshots", False) else None
+    if img_dir is not None:
+        img_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[genesis] saving screenshots to {img_dir}", flush=True)
 
     apps = [a.strip() for a in args.apps.split(",") if a.strip()] or [
         n for n, _ in HARNESS_APP_INVENTORY
@@ -303,7 +332,7 @@ def main():
                     print(f"[genesis]   {idx}.{s}: DONE ({time.time()-t0:.1f}s)",
                           flush=True)
                     break
-            rec = _trajectory_record(app_name, goal, agent)
+            rec = _trajectory_record(app_name, goal, agent, img_dir=img_dir, traj_idx=idx)
             rec["n_steps"] = len(agent.history)
             try:
                 traj_f.write(json.dumps(rec) + "\n")

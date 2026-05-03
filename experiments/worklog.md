@@ -459,3 +459,12 @@ committing GPU-hours to the full 8K-step pathZ run.
 - Insight: harness termination strategy is real infrastructure. Cannot remove or simplify without a smarter terminator that detects success earlier. The current mechanism is "terminate when stuck (no-ops)", which approximates "terminate when state hasn't changed for a while" — a weak heuristic but apparently sufficient for some tasks.
 - Reverted m3a_a11y.py to r43 no-op behavior.
 - Next: r45 = pivot to r42 (teacher rollouts on AL tasks). The harness levers are exhausted; the bottleneck is model grounding (wrong app, hallucinated indices). Need higher-quality on-distribution multi-step trajectory training data.
+
+### Run 48: Restore status:complete in genesis training data — aw_success_rate=15.00 (KEEP) 🎯
+- Timestamp: 2026-05-02 15:27
+- What changed: genesis_to_train.py now keeps trajectory through first status emission as end-marker (was: drop all status rows). m3a_format M3A_PROMPT_PREFIX restored status:complete and status:infeasible vocab (dropped in r43-r47). m3a_a11y status handler is terminal (with guard).
+- Result: AW-20 = 3/20 = 15.0% (was 5% in r47). AC=22/56.5 (open_app 75->100, input_text 90->80). AL=2.39/26.29. train_loss=0.73 clean.
+- Insight: FIRST TIME hitting 15% threshold across r19-r48. Successes: ClockStopWatchRunning, RecipeDeleteSingleRecipe, OpenAppTaskEval (Contacts) — last one is NEW, recovered from being lost since r43. The teacher-rollout (OS-Genesis) recipe finally bears fruit. open_app=100 offline confirms model knows AW launcher.
+- Failure analysis (6 failed trajectories): model NEVER emits status:complete at eval despite restored vocab. Camera tasks loop clicking shutter 8 times. Per-task ceiling with perfect status: +1-3 tasks (CameraTakePhoto certain, others maybe). 4/6 failures are GROUNDING errors (wrong indices, wrong text) not status timing.
+- Training data quality issue: 38 status:infeasible vs 23 status:complete rows. 35/49 'recovery' trajectories end in infeasible — teacher giving up after struggling. Bias toward giving up.
+- Next: r49 — drop infeasible-ending trajectories, simpler goals so teacher succeeds more, upsample status:complete signal.

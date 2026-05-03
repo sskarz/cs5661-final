@@ -2949,4 +2949,109 @@ After inspecting the AL data schema directly:
 
 **End of §53.** Loop continues; r28 in flight at the moment this entry was written.
 
+---
+
+## §54 — pathZ extended autoresearch: r48 → r57b (2026-05-02 → 2026-05-03)
+
+Continuation of §53 loop, re-entering at r48 after the project-prior context summary. Branch unchanged. **Total runs added: r48 + r49–r60 (Gemma) + r57b/r58/r60 (Qwen) = 13 new training experiments + 6 AW-116 evaluations.** Goal still ≥15% AW-116; floor at session start was r47 5% AW-20.
+
+### Phase 1 — Genesis trajectory pivot (r47 → r52)
+
+**r47** (predecessor, recap): OS-Genesis-style synthesis. Gemma 4 31B-it teacher rolled 95 trajectories on 19 AW apps using self-synthesized goals. After bucket-filter + reformat to smoke-v9 prompt: 75 traj / 434 rows. AW-20 = 1/20 = 5%. Failure mode: model trained without status-emission vocab → at eval cannot terminate, loops on shutter clicks until max_steps.
+
+**r48** (text-only baseline, accepted as project floor): restored `status:complete` and `status:infeasible` in the M3A action vocab. Modified `genesis_to_train.py` to keep through first `status` emission as trajectory end-marker (rather than dropping all status). Patched `m3a_a11y.py` status handler to be terminal with a guard requiring open_app + click before allowing complete. Resulted in 75 traj / 495 rows. Trained Gemma 4 E4B, train_loss 0.7335. **AW-20 = 3/20 = 15.0%** (first time crossing threshold). **AW-116 = 9/116 = 7.76%**. Wins: ClockStopWatchRunning, RecipeDeleteSingleRecipe, RecipeDeleteMultipleRecipesWithConstraint, OpenAppTaskEval, CameraTakeVideo (only on AW-116, AW-20 had it as fail), 4× System Settings (Bluetooth/Brightness/Wifi). KEEP rationale: matched our smoke-time best across r19–r47, established AW-116 baseline.
+
+**r49** (DISCARD): hypothesis was that 38 status:infeasible-ending trajectories were teaching student to give up. Modified `genesis_to_train.py` to drop trajectories ending in status:infeasible (75 traj → 37 traj, 495 → 290 rows). **AW-20 = 2/20 = 10%**, regression. Lost ClockStopWatchRunning (perennial win). Offline open_app collapsed 100→50 — those infeasible trajectories carried valuable open_app exemplars. Lesson: trajectory ENDS may be bad demos, MIDDLES are still useful — drop final step only, not whole trajectory.
+
+**Investigation gap r49→r50**: failure-mode audit on r48 AW-116 trajectories. Six failure patterns identified:
+1. Premature `status:complete` after one no-op (MarkorCreateNote);
+2. **Zero `answer` action examples** in 495 train rows but ~10 AW QA tasks need it (NotesIsTodo, NotesMeetingAttendeeCount, etc.);
+3. Truncated AW task prompts (ExpenseAddSingle: prompt cut off at `:` — harness data bug);
+4. Files search-vs-navigate confusion (Files has 0 successful training trajectories);
+5. Wrong-instance selection (MarkorDeleteNewest selects wrong note);
+6. Recording lifecycle multi-step confusion (AudioRecorder).
+Distribution audit: of genesis 75 traj, 38 status:infeasible vs 23 status:complete row-level. 6 apps had 0 status:complete trajectories at all (Files, Camera, Settings, OsmAnd, Simple Draw Pro, VLC) — all infeasible-only demos.
+
+**r50** (build/info): dropped `no_status_long` bucket from `KEEP_BUCKETS` to remove the poisonous "click shutter 12 times never declare complete" demo from Camera training data. 75 → 61 traj, 495 → 329 rows. Did not get AW-20 evaluated; superseded by r51.
+
+**r51** (KEEP, ties AW-20 best): r50 dataset + drop trajectories from the 6 zero-success apps + 10 hand-synthesized `answer`-action examples covering Joplin/Calendar/OpenTracks/Tasks QA. 42 traj / 231 + 10 = 241 rows. Trained Gemma 4 E4B, train_loss 0.5681 (best yet pre-Qwen). AC offline 19.5/54.0, AL 4.78/31.08, **al_status_type_match=12** (vs r48 2). **AW-20 = 3/20 = 15%** ties r48. **Same 3 wins as r48**, no Camera (Camera dropped from train). Synthetic answer worked — model now emits `answer(text='True')` — but **harness `m3a_a11y._has_attempted_navigation()` guard rejected `answer` actions** until both open_app AND click had run successfully. QA tasks navigated via `input_text` (search) → never satisfied click requirement → answer rejected for whole trajectory.
+
+**r52** (KEEP, project AW-116 record): vision-inference experiment. NO retraining — used r51 LoRA. Modified `m3a_a11y.py` `answer` guard to require any one successful action (was: open_app + click). Added new agent `m3a_gemma4_lora_a11y_vision` in `run.py` that constructs `GemmaMultimodalWrapper(text_only=False)` so the wrapper passes screenshots while the harness still emits the smoke-v9 text prompt. Tests whether Gemma E4B's pretrained multimodal capability augments the text-only LoRA at inference time. **AW-20 = 4/20 = 20.0%** — new project high. New wins: MarkorCreateFolder, MarkorDeleteNote (Markor never solved before with text-only). Lost OpenAppTaskEval (vision distraction on simple permission grant). **AW-116 = 10/116 = 8.62%** — also new project high. AW-116 wins: 1 Camera, 1 Clock, 1 Contacts, 2 Recipe, 1 RecipeNoise (NEW), 4 System (Bluetooth/Brightness/WifiOff/On), but lost some r48 Settings wins. Net +1 task vs r48.
+
+**r53** (CRASH × 4 attempts, all NaN): proper vision retrain — train with images so LoRA learns image-conditioned action selection rather than text-only. Re-rolled genesis with vision teacher (`genesis_synth.py` modified to capture `raw_screenshot` per step, plus PIL save under `data/pathZ/genesis_v2/screenshots/`). 65 trajectories, 424 steps, 456 PNG screenshots, 49 MB total. Trajectory ↔ screenshot mapping verified visually (Markor home → Markor task, etc.). Modified `train_smoke.py`: full processor passed to SFTTrainer instead of just tokenizer; row-level `images` field; tried `attn_implementation="eager"` to avoid sdpa+bf16 numerical overflow; tried `finetune_vision_layers=False` + `modules_to_save=[]` (frozen vision tower + projector — standard LLaVA SFT recipe); tried lr 2e-4 → 1e-4 → 2e-5. **All 4 attempts NaN on first forward pass.** Loss is NaN before any gradient step → numerical issue in the Unsloth FastVisionModel + bf16 + 226-row image dataset path that we cannot fix in autoresearch scope. Workarounds for next session: downgrade Unsloth/transformers, switch to non-Unsloth training, or change framework.
+
+### Phase 2 — text-only retrains on Gemma (r54 → r56)
+
+**r54** (CRASH 5 attempts, then DISCARD): tried text-only retrain on the new genesis_v2 trajectories (rolled with the harness-modified-for-r53 teacher). NaN at step 30 with full dataset. Bisected to confirm:
+- First 100 rows: trains fine.
+- Rows 100–225: NaN at step 20.
+- 16 rows containing PUA characters (U+E000–U+F8FF, Material Icon glyphs from Joplin sidebar) filtered out → still NaN at step 70.
+- Genesis_v2 alone (no answer_synth) at full 226 rows: NaN at step 30.
+- Original r51 dataset (231 rows): trains fine to loss 0.40.
+
+Conclusion: genesis_v2 has multiple bad rows beyond just PUA. The harness modification done for r53 (added `raw_screenshot` capture, relaxed answer guard) likely changed teacher behavior at rollout time, producing trajectories that destabilize training. r48 / r51 data unaffected. r54 abandoned.
+
+**r56** (KEEP, ties AW-20 best): r51 dataset + 600 steps (vs r51's 400). Sweet spot between r51 (clean) and r55 (NaN at epoch 10). Gemma E4B train_loss 0.3997. AC 22.0/53.5, AL 3.59/28.69. **AW-20 = 3/20 = 15%** ties r48/r51 BUT new task profile: ClockStopWatchPausedVerify ✅ (NEW — never solved across r19–r52!), ClockStopWatchRunning, RecipeDeleteSingleRecipe; lost OpenAppTaskEval. **AW-116 = 9/116 = 7.76%** matches r48 exactly. Same metric, different wins. Confirmed: longer training trades simple-task wins for harder-task wins, no net AW-116 gain.
+
+**r55** (CRASH): r51 data + 800 steps. Loss healthy through epoch 5 (loss 0.26), collapsed to NaN at epoch 10 (step ~660). 10 passes through 241 rows is past Gemma's stability ceiling at lr=2e-4.
+
+### Phase 3 — Model swap to Qwen (r57b → r60b)
+
+After exhausting Gemma-text and Gemma-vision-train, switched bases. User picked Qwen3.5-4B (text) + Qwen2.5-VL-3B (multimodal) per literature on stronger sub-7B bases.
+
+**r57** (CRASH, fixed in r57b): Qwen3.5-4B with default Gemma chat markers → all-zero gradients (response masking failed because Qwen uses ChatML `<|im_start|>user/assistant`, not Gemma's `<|turn>user/model`).
+
+**r57b** (KEEP, project AW-20 record-tied): Modified `train_smoke.py` to detect `qwen` in model name and use ChatML markers for the `UnslothVisionDataCollator`'s `train_on_responses_only` masking. Trained Qwen3.5-4B via FastVisionModel (Qwen3.5-4B has vision-tower modules even in text-only use, so the vision data collator accepts it). Same r51 dataset (241 rows). **train_loss = 0.1481** — far below Gemma's 0.7335 baseline; Qwen pretraining is much closer to the agent task distribution. AC offline 23.0/53.5 (slightly above Gemma r48's 22/56.5), open_app=100 (matches Gemma's perfect), AL 3.59/33.07 (best AL type-match across project), **al_status_type=16** (vs r48's 2). **AW-20 = 4/20 = 20%** ties r52 vision-inference for project AW-20 record, achieved with **text-only training on a different base**. Wins: ClockStopWatchRunning, MarkorDeleteNote, OpenAppTaskEval, RecipeDeleteSingleRecipe — different mix than r52 (gained OpenAppTaskEval, lost MarkorCreateFolder). Eval pipeline: Gemma `m3a_gemma4_lora_a11y` agent reused with `--gemma4_model_id=unsloth/Qwen3.5-4B` flag — no Qwen-specific wrapper needed since `GemmaMultimodalWrapper.predict_mm` calls `apply_chat_template` generically. **AW-116 = 8/116 = 6.90%** (113 attempted; emulator wedged on VLC tasks 114-116 same as r52). New AW-116 task profile: 3 NEW task families never solved by any prior Gemma run — **ContactsAddContact, ContactsNewContactDraft, TurnOnWifiAndOpenApp**. Lost: 4 Settings tasks (Bluetooth/Brightness/Wifi) Gemma had. Net 1 task below Gemma r52 (8 vs 10) but with disjoint capability surface. Suggests Gemma+Qwen ensemble or Qwen+RFT could exceed r52 record.
+
+**r58** (DISCARD): Qwen2.5-VL-3B-Instruct text-only training succeeded fast (loss 0.21 in 7 min). Eval BROKEN: AC=0/0, parse=29%. Sample preds: model emits free-form conversational text (eBay shopping advice, Q&A reformulations) instead of Reason/Action JSON. Same `eval_smoke.py` pipeline worked for Qwen3.5-4B — issue is specific to Qwen2.5-VL's vision-aware chat template injecting image placeholders even in text-only inference, confusing generation. Would need separate Qwen-VL-aware eval pathway.
+
+**r59** (CRASH): Qwen3-4B text-only via FastVisionModel rejected by `UnslothVisionDataCollator` (`TypeError: only for image models!` — Qwen3 base has no vision tower).
+
+**r60/r60b** (CRASH): added FastLanguageModel fallback in `train_smoke.py` for text-only models, then `trl.DataCollatorForCompletionOnlyLM` fallback for the collator. Latter doesn't exist in pinned trl version. Bailed.
+
+### Bugs and infrastructure fixes shipped this session
+
+- `genesis_synth.py`: `--save-screenshots` flag, `_trajectory_record(img_dir, traj_idx)` writes resized PNGs (≤640px wide) and adds `image: <relative path>` field per step.
+- `m3a_a11y.py`: capture `state.pixels.copy()` into `step_data['raw_screenshot']` so genesis can save screenshots; relax `answer` action guard from "open_app + click required" to "any one successful action required" (line 596–617). Original guard rejected QA-task trajectories that navigated via search-bar `input_text`.
+- `train_smoke.py`: model-family-aware ChatML markers for response masking; full processor passed for vision SFT (vs. tokenizer-only); row-level `images` field; FastLanguageModel fallback path; eager attention path for vision; `max_length` 16384 → 32768.
+- `run.py`: new agent `m3a_gemma4_lora_a11y_vision` (M3AA11Y harness with `text_only=False` so wrapper passes screenshots).
+- `run_aw_smoke_slice.sh`: `VISION=1` env var routes to vision-aware agent variant.
+- `autoresearch.sh`: `DATA_DIR` and `LR` env-var passthrough.
+- `scripts/aw_full_tasks.txt`: derived 116-task list from `task_metadata.json` for AW-116 runs.
+- `scripts/pathZ/genesis_compact_prompts.py` + `genesis_reformat.py`: prompt rebuilders to keep training prompts in smoke-v9 format (compact UI elements, M3A_PROMPT_PREFIX header) — necessary because raw M3AA11Y prompts triggered NaN training in r47.
+
+### Failures requiring next-session intervention
+
+- **Gemma 4 multimodal SFT NaN** (r53 × 4 attempts). Numerical instability in Unsloth FastVisionModel + bf16 + image batch on first forward. Not fixable from autoresearch scope. Fix path: pin older Unsloth/transformers, or use raw HF Trainer + accelerate for multimodal training.
+- **Qwen2.5-VL eval pipeline mismatch** (r58). Qwen-VL chat template injects vision placeholders that break decode in our text-only eval pathway. Fix: branch in `eval_smoke.py` and `m3a_gemma_wrapper.py` to handle Qwen-VL processor separately.
+- **Android emulator periodically wedges** (a11y tree fetch returns nothing) after WiFi-toggle tasks. `adb reboot` recovers without killing the emulator process. Recurs across r52 and r57b on AW-116 — 3 VLC tasks lost on each due to this.
+
+### Project state at end of §54
+
+**AW-20 best**: 4/20 = 20% (r52 Gemma vision-inference, r57b Qwen3.5-4B text-only — tied with disjoint task profiles).
+
+**AW-116 best**: 10/116 = 8.62% (r52 Gemma vision-inference). r57b Qwen3.5-4B text-only at 8/116 = 6.90% but with 3 task families no Gemma run ever solved.
+
+**Gap to 15% AW-116**: ~6 percentage points (≈7 more tasks).
+
+**Untried high-EV next steps** (next session):
+1. **RFT on r57b Qwen3.5-4B**: run student in AW env, filter by env-verified success, retrain with successful trajectories appended. Compounds within environment-verified data; ~4–8 verified successes per round.
+2. **OS-Genesis re-roll with Qwen as teacher** (instead of Gemma 4 31B): Qwen3.5-4B is cheaper (4B vs 31B teacher) and has better instruction-following — should produce more `status:complete`-ending trajectories than Gemma 31B's 33/95.
+3. **InternVL2.5-4B**: exact model from OS-Genesis paper that hits 15.18% AW. Most aligned with proven recipe.
+4. **Ensemble Gemma + Qwen**: their AW-116 wins are partially disjoint (Gemma: 4 Settings + 1 Camera unique; Qwen: 3 Contacts + WifiOpenApp unique). A trivial union ensemble would cover 13/116 = 11.2% if both models could be queried per-task.
+5. **bf16 inference of r48** (untried, ~30 min, no retrain). 4-bit quant errors compound across multi-step trajectories — bf16 inference may unlock 1–3 additional wins.
+
+**Untried but lower-EV**: bigger LoRA r=64, AC-only retrain on Qwen, Qwen2-7B (would need framework changes).
+
+### Artifacts
+
+- `autoresearch.jsonl` extended through r48–r57b (10 KEEP/INFO/CRASH lines added).
+- `outputs/r48/`, `outputs/r51/`, `outputs/r56/`, `outputs/r57b/` — adapter checkpoints for the four Gemma/Qwen runs that ran AW evals.
+- `outputs/r49/`, `outputs/r58/` — adapters for runs that regressed/failed eval, kept for diff analysis.
+- `data/pathZ/genesis/train_v4.jsonl` (495 rows, r48 base) and `train_r51_final.jsonl` (241 rows, r51/r56/r57b base).
+- `data/pathZ/genesis_v2/` — vision-teacher rollout with screenshots: `trajectories.jsonl`, `screenshots/*.png` (456 files, 49 MB), `train_v4.jsonl` and `train_v4_clean.jsonl` (PUA-filtered).
+- AW-116 trajectory pickles for r48 (`~/android_world/runs/r48_aw116/...`), r52 (`r52_aw116`), r56 (`r56_aw116`), r57b (`r57b_qwen_aw116`).
+
+**End of §54.**
+
 **End of training log.**

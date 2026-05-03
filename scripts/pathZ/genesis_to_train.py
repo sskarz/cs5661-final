@@ -67,10 +67,12 @@ def _classify_trajectory(rec: dict) -> tuple[str, int]:
     return "other", real_n
 
 
-# Buckets to include. Drop premature (status at step 0/1, teacher said
-# "done" without acting) and loop (stuck repeating same action). Keep
-# success + recovery + no_status_long (last is exploratory but not stuck).
-KEEP_BUCKETS = {"success", "recovery", "no_status_long"}
+# Buckets to include. r50: also drop no_status_long. Investigation of
+# r48 AW-116 CameraTakePhoto failure showed the Camera no_status_long
+# trajectory ("Take a photo of a 'Blue Vase' by tapping the Shutter
+# button") trained the model to click shutter 12× without ever emitting
+# status — directly poisoning AW eval behavior.
+KEEP_BUCKETS = {"success", "recovery"}
 
 
 def _convert_record(rec: dict, bucket: str) -> list[dict]:
@@ -97,7 +99,7 @@ def _convert_record(rec: dict, bucket: str) -> list[dict]:
             seen_status = True
         if action is None:
             continue
-        rows.append({
+        row = {
             "messages": [
                 {"role": "user", "content": [{"type": "text", "text": prompt}]},
                 {"role": "assistant", "content": [
@@ -109,7 +111,11 @@ def _convert_record(rec: dict, bucket: str) -> list[dict]:
             "_genesis_step": s.get("step"),
             "_genesis_bucket": bucket,
             "gt_m3a": action,
-        })
+        }
+        # r53: pass through screenshot path if present (vision training)
+        if s.get("image"):
+            row["image"] = s["image"]
+        rows.append(row)
         if seen_status:
             break  # status was the last useful step
     return rows

@@ -17,7 +17,7 @@ export PATH=$JAVA_HOME/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/em
 
 REPO=/home/sanskar/Documents/Github/cs5661-final
 AW=/home/sanskar/Documents/Github/android_world
-TASKS_FILE="$REPO/scripts/aw_smoke_tasks.txt"
+TASKS_FILE="${TASKS_FILE:-$REPO/scripts/aw_smoke_tasks.txt}"
 LOGDIR="$REPO/outputs/androidworld_logs"
 mkdir -p "$LOGDIR"
 
@@ -42,6 +42,10 @@ A11Y=${A11Y:-0}
 if [[ -z "$ADAPTER" ]]; then
   AGENT=m3a_gemma4_baseline
   EXTRA_ARGS=()
+elif [[ "$A11Y" == "1" && "${VISION:-0}" == "1" ]]; then
+  AGENT=m3a_gemma4_lora_a11y_vision
+  EXTRA_ARGS=(--adapter_path="$ADAPTER")
+  echo "[aw-smoke] mode=a11y+vision (smoke-v9 prompt + screenshots)" | tee -a "$LOG"
 elif [[ "$A11Y" == "1" ]]; then
   AGENT=m3a_gemma4_lora_a11y
   EXTRA_ARGS=(--adapter_path="$ADAPTER")
