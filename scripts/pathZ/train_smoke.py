@@ -29,8 +29,127 @@ DEFAULTS = {
     "lora_alpha": 64,
     "max_length": 32768,
     "train_projector": True,
+    "train_vision_head": False,
     "seed": 3407,
 }
+
+
+PROJECTOR_OR_MERGE_MODULE_SUFFIXES = (
+    # Gemma-style multimodal projection.
+    "embedding_projection",
+    "embed_vision.embedding_projection",
+    # Common LLaVA / HF multimodal projector names.
+    "multi_modal_projector",
+    "mm_projector",
+    "vision_projector",
+    "vision_projection",
+    # Qwen-VL-style image token merger / connector modules, when exposed.
+    "visual.merger",
+    "vision_tower.merger",
+    "vision_model.merger",
+    "merger",
+    "resampler",
+    "connector",
+)
+
+
+def _module_name_matches(name: str, suffix: str) -> bool:
+    return name == suffix or name.endswith(f".{suffix}")
+
+
+def _existing_module_suffixes(model, suffixes: tuple[str, ...]) -> list[str]:
+    module_names = [name for name, _ in model.named_modules()]
+    existing: list[str] = []
+    matched_modules: set[str] = set()
+    for suffix in suffixes:
+        matches = [
+            name for name in module_names
+            if _module_name_matches(name, suffix) and name not in matched_modules
+        ]
+        if matches:
+            existing.append(suffix)
+            matched_modules.update(matches)
+    return existing
+
+
+def _is_projector_or_merge_param(lname: str) -> bool:
+    if any(
+        token in lname
+        for token in (
+            "embed_vision",
+            "embedding_projection",
+            "multi_modal_projector",
+            "mm_projector",
+            "vision_projector",
+            "vision_projection",
+            "resampler",
+            "connector",
+        )
+    ):
+        return True
+    return (
+        "merger" in lname
+        and any(token in lname for token in ("vision", "visual", "image"))
+    )
+
+
+def _active_adapter_name(model) -> str:
+    active_adapter = getattr(model, "active_adapter", None)
+    if callable(active_adapter):
+        active_adapter = active_adapter()
+    if isinstance(active_adapter, (list, tuple)):
+        active_adapter = active_adapter[0] if active_adapter else None
+    return active_adapter or "default"
+
+
+def _extend_peft_modules_to_save(model, adapter_name: str,
+                                 modules_to_save: list[str]) -> None:
+    peft_config = getattr(model, "peft_config", None)
+    if not peft_config or adapter_name not in peft_config:
+        return
+    config = peft_config[adapter_name]
+    current = list(config.modules_to_save or [])
+    for module_name in modules_to_save:
+        if module_name not in current:
+            current.append(module_name)
+    config.modules_to_save = current
+
+
+def _print_trainable_params(model) -> dict[str, int]:
+    buckets: dict[str, int] = {}
+    total = 0
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        n = p.numel()
+        total += n
+        lname = name.lower()
+        if _is_projector_or_merge_param(lname):
+            bucket = "vision_projector"
+        elif (
+            "vision_tower" in lname
+            or "vision_model" in lname
+            or ".visual." in lname
+            or lname.startswith("visual.")
+            or "image" in lname
+            or "patch" in lname
+        ):
+            bucket = "vision_tower"
+        elif "audio" in lname:
+            bucket = "audio"
+        elif "language_model" in lname or "model.layers" in lname:
+            bucket = "language_model"
+        elif "embed_tokens" in lname:
+            bucket = "embed_tokens"
+        elif "lm_head" in lname:
+            bucket = "lm_head"
+        else:
+            bucket = "other"
+        buckets[bucket] = buckets.get(bucket, 0) + n
+    print(f"[smoke-train] trainable_params_total={total:,}")
+    for bucket, n in sorted(buckets.items(), key=lambda x: -x[1]):
+        print(f"[smoke-train] trainable_params {bucket}={n:,}")
+    return buckets
 
 
 def main() -> None:
@@ -54,6 +173,8 @@ def main() -> None:
     ap.add_argument("--blank-image-placeholder", action="store_true",
                     help="Legacy opt-in: for non-text-only rows without an "
                          "image path, insert an image content block anyway.")
+    ap.add_argument("--param-check-only", action="store_true",
+                    help=argparse.SUPPRESS)
     for k, v in DEFAULTS.items():
         if isinstance(v, bool):
             ap.add_argument(f"--{k.replace('_', '-')}",
@@ -79,7 +200,8 @@ def main() -> None:
           f"lr={args.lr} "
           f"batch={args.batch_size}x{args.grad_accum} "
           f"lora_r={args.lora_r} alpha={args.lora_alpha} "
-          f"projector={'on' if args.train_projector else 'off'}")
+          f"projector={'on' if args.train_projector else 'off'} "
+          f"vision_head={'on' if args.train_vision_head else 'off'}")
     if effective_model_name != args.model:
         print(f"[smoke-train] adapter base_model_name_or_path={effective_model_name}")
 
@@ -113,18 +235,29 @@ def main() -> None:
         if not hasattr(processor, "tokenizer"):
             processor.tokenizer = tokenizer
 
-    # r53 fix: when training with images (text_only=False), keep vision
-    # tower + projector FROZEN. With them unfrozen + LoRA at lr=2e-4,
-    # forward pass on first image step explodes to NaN. Standard vision
-    # SFT recipe: vision tower frozen, projector frozen, text-side LoRA
-    # learns to attend to image embeddings.
+    # r53 default: when training with images (text_only=False), keep vision
+    # tower + projector frozen to preserve the r62 recipe. r63 can opt in to
+    # adapting screenshot features with --train-vision-head.
     vision_mode = not args.text_only
     if vision_mode:
-        modules_to_save = []  # no embedding_projection unfreeze
+        # r62/default image training intentionally saves no projector module.
+        # r63 opt-in discovers real projector/merge modules instead of assuming
+        # Gemma's embed_vision.embedding_projection exists on every model.
+        modules_to_save = (
+            _existing_module_suffixes(model, PROJECTOR_OR_MERGE_MODULE_SUFFIXES)
+            if args.train_vision_head else []
+        )
     else:
         modules_to_save = ["embedding_projection"] if args.train_projector else []
+    if vision_mode and args.train_vision_head:
+        if modules_to_save:
+            print("[smoke-train] projector/merge modules_to_save="
+                  f"{modules_to_save}")
+        else:
+            print("[smoke-train] WARNING: no projector/merge module found to "
+                  "save; relying on vision-side LoRA params")
     peft_kwargs = dict(
-        finetune_vision_layers=not vision_mode,
+        finetune_vision_layers=(not vision_mode) or args.train_vision_head,
         finetune_language_layers=True,
         finetune_attention_modules=True,
         finetune_mlp_modules=True,
@@ -139,11 +272,41 @@ def main() -> None:
     if is_adapter_path or model_is_peft:
         print("[smoke-train] loaded PEFT adapter; continuing without new LoRA wrap "
               f"(adapter_config={is_adapter_path}, model_peft={model_is_peft})")
+        if modules_to_save:
+            from peft.utils.other import _set_trainable
+
+            adapter_name = _active_adapter_name(model)
+            _set_trainable(
+                model,
+                adapter_name,
+                modules_to_save,
+                inference_mode=False,
+                strict_module_check=False,
+            )
+            _extend_peft_modules_to_save(model, adapter_name, modules_to_save)
+            print("[smoke-train] PEFT modules_to_save extended for "
+                  f"adapter={adapter_name}: {modules_to_save}")
     else:
         model = FastVisionModel.get_peft_model(model, **peft_kwargs)
     FastVisionModel.for_training(model)
     if vision_mode:
-        print(f"[smoke-train] vision mode: vision tower + projector FROZEN")
+        if args.train_vision_head:
+            print("[smoke-train] vision mode: vision tower + projector TRAINABLE")
+        else:
+            print("[smoke-train] vision mode: vision tower + projector FROZEN")
+    trainable_buckets = _print_trainable_params(model)
+    if vision_mode and args.train_vision_head:
+        if trainable_buckets.get("vision_tower", 0) == 0:
+            raise RuntimeError(
+                "--train-vision-head requested, but vision_tower has 0 trainable params"
+            )
+        if trainable_buckets.get("vision_projector", 0) == 0:
+            print("[smoke-train] WARNING: --train-vision-head requested, but "
+                  "no trainable projector/merge bucket was found; continuing "
+                  "because vision_tower has trainable params")
+    if args.param_check_only:
+        print("[smoke-train] param-check-only complete; exiting before dataset/trainer")
+        return
 
     # Lazy-image dataset, same shape as Run L's trainer.
     class SmokeDataset(Dataset):
