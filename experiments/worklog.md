@@ -468,3 +468,68 @@ committing GPU-hours to the full 8K-step pathZ run.
 - Failure analysis (6 failed trajectories): model NEVER emits status:complete at eval despite restored vocab. Camera tasks loop clicking shutter 8 times. Per-task ceiling with perfect status: +1-3 tasks (CameraTakePhoto certain, others maybe). 4/6 failures are GROUNDING errors (wrong indices, wrong text) not status timing.
 - Training data quality issue: 38 status:infeasible vs 23 status:complete rows. 35/49 'recovery' trajectories end in infeasible — teacher giving up after struggling. Bias toward giving up.
 - Next: r49 — drop infeasible-ending trajectories, simpler goals so teacher succeeds more, upsample status:complete signal.
+
+
+### r62 Qwen3.5 r57b + Genesis vision continuation
+
+Status: training complete; full benchmark not started yet.
+
+Why this exists: r61 trained Qwen3.5 on only 107 Genesis vision rows for 200 optimizer steps (~7.5 epochs) and early AW-116 was 0/15, so the run was canceled as likely overfit/catastrophic forgetting.
+
+Fixes applied:
+- `train_smoke.py` now supports `--epochs`; r62 uses 2 epochs instead of fixed 200 steps.
+- Missing-image rows no longer receive blank image placeholders by default; old behavior is opt-in via `--blank-image-placeholder`.
+- Adapter continuation support added: r62 starts from known-good `outputs/r57b/checkpoint-final` instead of base Qwen.
+- Added helper: `scripts/pathZ/run_r62_qwen35_vision_continuation.sh`.
+- Added optional mixed-data builder: `scripts/pathZ/build_r62_mixed_train.py`.
+
+Training command:
+```bash
+./scripts/pathZ/run_r62_qwen35_vision_continuation.sh
+```
+
+Effective setup:
+- base adapter: `outputs/r57b/checkpoint-final`
+- train JSONL: `data/pathZ/genesis_vision_rebuild/train.expanded.jsonl`
+- rows: 107
+- epochs: 2.0
+- computed steps: 54
+- lr: 5e-5
+- effective batch: 4
+- output: `outputs/r62_qwen35_r57b_plus_genesis_vision_e2/checkpoint-final`
+- final train loss: 0.3321
+
+Next eval recommendation: AW-20 first. Do not run full AW-116 unless AW-20 is at least competitive with r57b/r52 (~20%).
+
+
+### r62 AW-20 smoke eval
+
+Command:
+```bash
+TAG=r62_qwen35_vision_cont_aw_smoke A11Y=1 VISION=1 \
+ADAPTER=outputs/r62_qwen35_r57b_plus_genesis_vision_e2/checkpoint-final \
+./scripts/run_aw_smoke_slice.sh
+```
+
+Result: **3/20 = 15.00%**.
+
+Successes: MarkorCreateFolder,OpenAppTaskEval,RecipeDeleteSingleRecipe
+
+Interpretation:
+- r62 recovered partially from r61's collapse, but did **not** beat r57b text-only AW-20 (4/20 = 20%).
+- It lost r57b's `ClockStopWatchRunning` and `MarkorDeleteNote` wins, but gained/kept `MarkorCreateFolder` and kept `OpenAppTaskEval` + `RecipeDeleteSingleRecipe`.
+- Vision continuation is therefore not clearly beneficial yet. It changes the task profile, but net is -1 task vs r57b on AW-20.
+- Do not run AW-116 for r62.
+
+
+## r62 — Qwen3.5 r57b + low-epoch Genesis vision continuation full AW-116
+
+- Timestamp: 2026-05-05 03:09:59 PDT
+- Training: continued from `outputs/r57b/checkpoint-final` on 107 aligned Genesis vision rows for 2 epochs / 54 steps; final train loss `0.3321`.
+- AW-20 smoke before full: 3/20 = 15.00%; user requested full AW-116 anyway.
+- AW-116 command: `run.py --suite_family=android_world --agent_name=m3a_gemma4_lora_a11y_vision --adapter_path=/home/sanskar/Documents/Github/cs5661-final/outputs/r62_qwen35_r57b_plus_genesis_vision_e2/checkpoint-final --output_path=/home/sanskar/android_world/runs/r62_qwen35_vision_cont_aw116`
+- AW-116 result: **10/115 = 8.70%** attempted; records=116; exceptions=1; run_exit=0.
+- Successes: ContactsNewContactDraft, MarkorCreateFolder, OpenAppTaskEval, RecipeDeleteMultipleRecipesWithConstraint, RecipeDeleteSingleRecipe, SimpleCalendarDeleteOneEvent, SystemBrightnessMaxVerify, SystemBrightnessMinVerify, SystemWifiTurnOnVerify, TurnOnWifiAndOpenApp.
+- Verdict: KEEP. Beats/ties prior 8.62% AW-116 best.
+- Row artifacts: `/home/sanskar/Documents/Github/cs5661-final/outputs/androidworld_logs/r62_qwen35_vision_cont_aw116.rows.md`, `/home/sanskar/Documents/Github/cs5661-final/outputs/androidworld_logs/r62_qwen35_vision_cont_aw116.rows.json`.
+- Run artifacts: `/home/sanskar/android_world/runs/r62_qwen35_vision_cont_aw116/run_20260505T011652695623`, `/home/sanskar/Documents/Github/cs5661-final/outputs/androidworld_logs/r62_qwen35_vision_cont_aw116.log`.

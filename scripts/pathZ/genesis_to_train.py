@@ -127,11 +127,25 @@ def main():
     ap.add_argument("--out", default="data/pathZ/genesis/train.jsonl")
     ap.add_argument("--min-steps", type=int, default=2,
                     help="drop trajectories with fewer than N useful steps")
+    ap.add_argument("--image-root", type=Path, default=None,
+                    help="Absolute path to the screenshots directory. "
+                         "When set, all rows with an `image` field get "
+                         "`_image_root` so train_smoke.py can resolve "
+                         "relative PNG paths. Auto-detected from --src "
+                         "if not provided (expects <src_parent>/screenshots).")
     args = ap.parse_args()
 
     src = Path(args.src)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Resolve image root for screenshot-backed rows
+    image_root = args.image_root
+    if image_root is None and src.parent.name == "genesis":
+        # Default: screenshots live next to trajectories.jsonl
+        image_root = src.parent / "screenshots"
+    if image_root is not None:
+        image_root = image_root.resolve()
 
     from collections import Counter
     n_traj = n_kept_traj = n_rows = 0
@@ -156,6 +170,9 @@ def main():
             bucket_rows[bucket] += len(rows)
             by_app[rec.get("app", "?")] = by_app.get(rec.get("app", "?"), 0) + len(rows)
             for r in rows:
+                # r53: stamp image root so train_smoke.py can resolve PNGs
+                if image_root is not None and r.get("image"):
+                    r["_image_root"] = str(image_root)
                 fout.write(json.dumps(r) + "\n")
                 n_rows += 1
 

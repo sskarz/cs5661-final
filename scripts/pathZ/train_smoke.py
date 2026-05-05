@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 # These get set on the CLI by autoresearch.sh; the file's *defaults* are
@@ -46,6 +47,13 @@ def main() -> None:
                          "The user prompt already contains the rendered "
                          "UI elements text (a11y), so this exercises "
                          "AndroidLab paper's XML/a11y-only mode.")
+    ap.add_argument("--epochs", type=float, default=None,
+                    help="Optional epoch target. When set, max_steps is "
+                         "computed after loading the dataset as "
+                         "ceil(rows * epochs / effective_batch).")
+    ap.add_argument("--blank-image-placeholder", action="store_true",
+                    help="Legacy opt-in: for non-text-only rows without an "
+                         "image path, insert an image content block anyway.")
     for k, v in DEFAULTS.items():
         if isinstance(v, bool):
             ap.add_argument(f"--{k.replace('_', '-')}",
@@ -58,10 +66,22 @@ def main() -> None:
             ap.add_argument(f"--{k.replace('_', '-')}", type=float, default=v)
     args = ap.parse_args()
 
-    print(f"[smoke-train] recipe: max_steps={args.max_steps} lr={args.lr} "
+    model_path = Path(args.model)
+    adapter_config_path = model_path / "adapter_config.json"
+    effective_model_name = args.model
+    if adapter_config_path.is_file():
+        with adapter_config_path.open() as f:
+            adapter_config = json.load(f)
+        effective_model_name = adapter_config.get("base_model_name_or_path") or args.model
+
+    print(f"[smoke-train] recipe: max_steps={args.max_steps} "
+          f"epochs={args.epochs if args.epochs is not None else 'off'} "
+          f"lr={args.lr} "
           f"batch={args.batch_size}x{args.grad_accum} "
           f"lora_r={args.lora_r} alpha={args.lora_alpha} "
           f"projector={'on' if args.train_projector else 'off'}")
+    if effective_model_name != args.model:
+        print(f"[smoke-train] adapter base_model_name_or_path={effective_model_name}")
 
     from PIL import Image
     from torch.utils.data import Dataset
@@ -114,7 +134,13 @@ def main() -> None:
     )
     if modules_to_save:
         peft_kwargs["modules_to_save"] = modules_to_save
-    model = FastVisionModel.get_peft_model(model, **peft_kwargs)
+    is_adapter_path = adapter_config_path.is_file()
+    model_is_peft = hasattr(model, "peft_config") or "peft" in type(model).__module__.lower()
+    if is_adapter_path or model_is_peft:
+        print("[smoke-train] loaded PEFT adapter; continuing without new LoRA wrap "
+              f"(adapter_config={is_adapter_path}, model_peft={model_is_peft})")
+    else:
+        model = FastVisionModel.get_peft_model(model, **peft_kwargs)
     FastVisionModel.for_training(model)
     if vision_mode:
         print(f"[smoke-train] vision mode: vision tower + projector FROZEN")
@@ -141,12 +167,19 @@ def main() -> None:
                 # Per-row _image_root takes precedence (lets us mix data
                 # sources rooted in different directories — AC + AndroidLab).
                 img_root = Path(row.get("_image_root") or self.root)
-                img = Image.open(img_root / row["image"]).convert("RGB")
-                # r53: prepend image placeholder in user content so the chat
-                # template emits image markers, but keep the actual PIL image
-                # at row level so the collator passes it to processor.images=.
-                user_content.insert(0, {"type": "image", "image": img})
-                images.append(img)
+                img_path = row.get("image")
+                if img_path:
+                    img = Image.open(img_root / img_path).convert("RGB")
+                    # r53: prepend image placeholder in user content so the chat
+                    # template emits image markers, but keep the actual PIL image
+                    # at row level so the collator passes it to processor.images=.
+                    user_content.insert(0, {"type": "image", "image": img})
+                    images.append(img)
+                elif args.blank_image_placeholder:
+                    # Legacy behavior for explicit experiments only. Default
+                    # keeps missing-image rows text-only so the processor does
+                    # not see image markers without a corresponding image.
+                    user_content.insert(0, {"type": "image"})
             sample = {
                 "messages": [
                     {"role": "user", "content": user_content},
@@ -160,12 +193,23 @@ def main() -> None:
             return sample
 
     dataset = SmokeDataset(args.train_jsonl, args.data_dir)
-    print(f"[smoke-train] {len(dataset)} train rows")
+    train_rows = len(dataset)
+    effective_batch = args.batch_size * args.grad_accum
+    if effective_batch <= 0:
+        raise ValueError("effective batch must be positive")
+    if args.epochs is not None:
+        if args.epochs <= 0:
+            raise ValueError("--epochs must be positive")
+        args.max_steps = math.ceil(train_rows * args.epochs / effective_batch)
+    estimated_epochs = args.max_steps * effective_batch / train_rows if train_rows else 0.0
+    print(f"[smoke-train] train_rows={train_rows} effective_batch={effective_batch} "
+          f"requested_epochs={args.epochs if args.epochs is not None else 'off'} "
+          f"max_steps={args.max_steps} estimated_actual_epochs={estimated_epochs:.3f}")
 
     # Mask everything before the assistant turn so loss only fires on
     # Reason+Action tokens. r57: pick markers per model family
     # (Gemma uses <|turn>user/model, Qwen uses <|im_start|>user/assistant).
-    if "qwen" in args.model.lower():
+    if "qwen" in effective_model_name.lower():
         instruction_part = "<|im_start|>user\n"
         response_part = "<|im_start|>assistant\n"
         print(f"[smoke-train] using Qwen ChatML markers for response masking")

@@ -212,6 +212,13 @@ def main() -> None:
                          "empty history, gold=open_app(X)). Adds N*19 rows "
                          "to the open_app bucket so balance-classes has "
                          "enough on-distribution open_app coverage.")
+    ap.add_argument("--genesis-jsonl", type=Path, default=None,
+                    help="Path to genesis vision training JSONL (output of "
+                         "genesis_to_train.py or genesis_vision_train.py). "
+                         "When set, genesis rows with screenshots are mixed "
+                         "into the balanced training data alongside AC + AL. "
+                         "Genesis rows must have `image` + `_image_root` "
+                         "fields for vision training.")
     args = ap.parse_args()
 
     src = Path(args.src)
@@ -471,6 +478,22 @@ def main() -> None:
             if plans_by_goal:
                 print(f"[prep] augmented {n_planned} AL rows with plans; "
                       f"filtered {n_filtered} rows from misaligned trajectories")
+        # Genesis vision rows (teacher-rollout trajectories with screenshots).
+        # These are NOT mixed with AC/AL data - indices are dataset-specific.
+        # Train genesis data separately with its own pipeline.
+        genesis_buckets: dict[str, list[dict]] = defaultdict(list)
+        if args.genesis_jsonl is not None and args.genesis_jsonl.exists():
+            with open(args.genesis_jsonl) as f:
+                for line in f:
+                    r = json.loads(line)
+                    gt = r.get("gt_m3a", {})
+                    if gt and gt.get("action_type") and r.get("image"):
+                        genesis_buckets[gt["action_type"]].append(r)
+            print(f"[prep] Genesis vision pool sizes: "
+                  f"{ {k: len(v) for k, v in genesis_buckets.items()} }")
+            # If genesis data is provided, write ONLY genesis rows (no mixing)
+            print("[prep] WARNING: Genesis data provided - writing genesis-only training set")
+            print("[prep] Genesis indices are dataset-specific and cannot be mixed with AC/AL")
         # Drop classes whose source pool is much smaller than the target —
         # otherwise we replay the same handful of rows many times, which
         # overfits to that class. Keep replay factor ≤ ~2.5x.
@@ -490,40 +513,60 @@ def main() -> None:
             classes_to_emit = list(buckets.keys()) + ["status"]
         else:
             classes_to_emit = list(buckets.keys())
-        with open(out_train, "w") as f:
-            for at in sorted(set(classes_to_emit)):
-                ac_rows = buckets.get(at, [])
-                al_rows = al_buckets.get(at, [])
-                target = _target_for(at)
-                # When both pools have the class, take half from each to
-                # diversify the training distribution. When only one has it,
-                # use that pool.
-                if ac_rows and al_rows:
-                    half = target // 2
-                    s_ac = (rng2.sample(ac_rows, min(half, len(ac_rows)))
-                            if len(ac_rows) >= half
-                            else [rng2.choice(ac_rows) for _ in range(half)])
-                    s_al = (rng2.sample(al_rows, min(target - half, len(al_rows)))
-                            if len(al_rows) >= target - half
-                            else [rng2.choice(al_rows) for _ in range(target - half)])
-                    samp = s_ac + s_al
-                    src_label = f"AC={len(s_ac)}+AL={len(s_al)}"
-                else:
-                    pool = ac_rows or al_rows
-                    if not pool:
+
+        # Genesis vision training: write ONLY genesis rows (teacher distillation).
+        # AC/AL data is kept completely separate - indices are dataset-specific.
+        if genesis_buckets:
+            print("[prep] Genesis vision mode - writing ONLY genesis rows")
+            print("[prep] AC/AL data is NOT mixed (dataset-specific indices)")
+            n_train_written = 0
+            with open(out_train, "w") as f:
+                for at in sorted(genesis_buckets.keys()):
+                    gen_rows = genesis_buckets[at]
+                    if not gen_rows:
                         continue
-                    if len(pool) >= target:
-                        samp = rng2.sample(pool, target)
+                    rng2.shuffle(gen_rows)
+                    for row in gen_rows:
+                        f.write(json.dumps(row) + "\n")
+                        n_train_written += 1
+                    print(f"[prep]   {at:18s} gen={len(gen_rows):4d} written")
+            print(f"[prep] Genesis vision train: {n_train_written} rows total")
+        else:
+            # Text-only training: AC/AL mixing as before
+            n_train_written = 0
+            with open(out_train, "w") as f:
+                for at in sorted(set(classes_to_emit)):
+                    ac_rows = buckets.get(at, [])
+                    al_rows = al_buckets.get(at, [])
+                    target = _target_for(at)
+                    if ac_rows and al_rows:
+                        half = target // 2
+                        s_ac = (rng2.sample(ac_rows, min(half, len(ac_rows)))
+                                if len(ac_rows) >= half
+                                else [rng2.choice(ac_rows) for _ in range(half)])
+                        s_al = (rng2.sample(al_rows, min(target - half, len(al_rows)))
+                                if len(al_rows) >= target - half
+                                else [rng2.choice(al_rows) for _ in range(target - half)])
+                        samp = s_ac + s_al
+                        src_label = f"AC={len(s_ac)}+AL={len(s_al)}"
+                    elif ac_rows or al_rows:
+                        pool = ac_rows or al_rows
+                        if not pool:
+                            continue
+                        if len(pool) >= target:
+                            samp = rng2.sample(pool, target)
+                        else:
+                            samp = [rng2.choice(pool) for _ in range(target)]
+                        src_label = f"{'AC' if ac_rows else 'AL'}={len(samp)}"
                     else:
-                        samp = [rng2.choice(pool) for _ in range(target)]
-                    src_label = f"{'AC' if ac_rows else 'AL'}={len(samp)}"
-                rng2.shuffle(samp)
-                for row in samp:
-                    f.write(json.dumps(row) + "\n")
-                    n_train_written += 1
-                print(f"[prep]   {at:18s} ac_pool={len(ac_rows):4d} "
-                      f"al_pool={len(al_rows):4d} sampled={len(samp):4d} "
-                      f"({src_label})")
+                        continue
+
+                    rng2.shuffle(samp)
+                    for row in samp:
+                        f.write(json.dumps(row) + "\n")
+                        n_train_written += 1
+                    print(f"[prep]   {at:18s} ac={len(ac_rows):4d} al={len(al_rows):4d} sampled={len(samp):4d} ({src_label})")
+            print(f"[prep] AC/AL text-only train: {n_train_written} rows total")
     else:
         n_train_written = 0
         with open(out_train, "w") as f:
