@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=1920, height=1080" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@700;800;900&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" />
     <script src="assets/gsap.min.js"></script>
     <style>
       * { box-sizing: border-box; }
@@ -14,9 +14,9 @@
         height: 1080px;
         margin: 0;
         overflow: hidden;
-        background: #0a0a0a;
-        color: #f5fbff;
-        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        background: #fafafa;
+        color: #1f2937;
+        font-family: "Google Sans", Roboto, Arial, sans-serif;
       }
       #root {
         position: relative;
@@ -24,21 +24,21 @@
         height: 1080px;
         overflow: hidden;
         background:
-          radial-gradient(circle at 52% 48%, rgba(0, 102, 255, 0.16), transparent 30%),
-          radial-gradient(circle at 18% 84%, rgba(0, 212, 255, 0.12), transparent 28%),
-          linear-gradient(180deg, #050505 0%, #0a0a0d 58%, #020203 100%);
+          radial-gradient(circle at 14% 14%, rgba(61, 220, 132, 0.18), transparent 28%),
+          radial-gradient(circle at 84% 20%, rgba(66, 133, 244, 0.14), transparent 24%),
+          radial-gradient(circle at 78% 86%, rgba(7, 193, 96, 0.15), transparent 26%),
+          linear-gradient(180deg, #ffffff 0%, #fafafa 55%, #f1f5f9 100%);
       }
-      #root::after {
+      #root::before {
         content: "";
         position: absolute;
         inset: 0;
-        pointer-events: none;
-        background:
-          linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(0,212,255,0.045) 1px, transparent 1px);
-        background-size: 58px 58px;
-        mask-image: radial-gradient(circle at center, black 0 55%, transparent 82%);
-        animation: gridMove 3.6s linear infinite;
+        background-image:
+          linear-gradient(rgba(52, 168, 83, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(66, 133, 244, 0.08) 1px, transparent 1px);
+        background-size: 72px 72px;
+        mask-image: radial-gradient(circle at 50% 48%, black 0 50%, transparent 82%);
+        animation: materialGrid 8s linear infinite;
       }
       .clip { position: absolute; }
       .scene {
@@ -46,136 +46,197 @@
         overflow: visible;
         display: grid;
         place-items: center;
+        perspective: 1500px;
+        transform-style: preserve-3d;
       }
-      .vignette {
+      .soft-vignette {
         inset: 0;
-        z-index: 99;
+        z-index: 95;
         pointer-events: none;
         background:
-          radial-gradient(circle at center, transparent 42%, rgba(0,0,0,0.66) 100%),
-          linear-gradient(180deg, rgba(255,255,255,0.06), transparent 10%, transparent 88%, rgba(255,255,255,0.05));
+          radial-gradient(circle at center, transparent 52%, rgba(52, 168, 83, 0.08) 100%),
+          linear-gradient(180deg, rgba(255,255,255,0.3), transparent 14%, transparent 84%, rgba(255,255,255,0.35));
       }
-      .scanlines {
+      .wave-field {
         inset: 0;
-        z-index: 98;
-        opacity: 0.22;
+        z-index: 1;
         pointer-events: none;
-        background: repeating-linear-gradient(180deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 5px);
-        mix-blend-mode: overlay;
+        opacity: 0.8;
       }
-      .streak {
-        width: 760px;
-        height: 4px;
-        border-radius: 999px;
-        background: linear-gradient(90deg, transparent, #00d4ff, #fff, transparent);
-        filter: blur(1px) drop-shadow(0 0 18px #00d4ff);
-        transform: rotate(-18deg);
-        opacity: 0;
+      .wave {
+        fill: none;
+        stroke: rgba(61, 220, 132, 0.24);
+        stroke-width: 4;
+        stroke-linecap: round;
+        stroke-dasharray: 18 24;
+        animation: waveDash 4.8s linear infinite;
       }
+      .wave.blue { stroke: rgba(66, 133, 244, 0.18); animation-duration: 6.4s; }
       .particles {
         inset: 0;
+        z-index: 60;
         pointer-events: none;
-        z-index: 55;
       }
       .particle {
         position: absolute;
-        width: 5px;
-        height: 5px;
+        width: 10px;
+        height: 10px;
         border-radius: 50%;
-        background: #00d4ff;
-        box-shadow: 0 0 16px #00d4ff;
-        opacity: 0.8;
-        animation: particleDrift 5s ease-in-out infinite alternate;
+        background: #3ddc84;
+        box-shadow: 0 0 20px rgba(61, 220, 132, 0.6);
+        opacity: 0.62;
+        animation: particlePath 5.6s cubic-bezier(.45,0,.2,1) infinite alternate;
       }
-      .title {
-        font-family: "Space Grotesk", Inter, sans-serif;
-        font-size: 164px;
-        line-height: 0.84;
-        letter-spacing: 0;
+      .particle:nth-child(3n) { background: #4285f4; box-shadow: 0 0 20px rgba(66, 133, 244, 0.5); }
+      .particle:nth-child(4n) { background: #07c160; }
+      .blob {
+        position: absolute;
+        border-radius: 44% 56% 62% 38% / 48% 42% 58% 52%;
+        background: linear-gradient(135deg, #3ddc84, #34a853 48%, #4285f4);
+        filter: drop-shadow(0 32px 68px rgba(52, 168, 83, 0.22));
+        animation: blobMorph 5.5s ease-in-out infinite alternate, gradientShift 6s ease-in-out infinite;
+        background-size: 240% 240%;
+      }
+      .blob.light {
+        background: linear-gradient(135deg, rgba(61,220,132,.2), rgba(66,133,244,.14), rgba(255,255,255,.45));
+        filter: blur(0) drop-shadow(0 30px 70px rgba(66, 133, 244, 0.13));
+      }
+      .headline {
+        font-size: 132px;
+        line-height: 0.92;
+        font-weight: 900;
         text-align: center;
-        font-weight: 700;
         text-transform: uppercase;
-        text-shadow:
-          0 0 18px rgba(0, 212, 255, 0.92),
-          0 0 70px rgba(0, 102, 255, 0.8);
+        color: #202124;
       }
-      .huge {
-        font-family: "Space Grotesk", Inter, sans-serif;
-        font-size: 146px;
-        line-height: 0.9;
-        letter-spacing: 0;
+      .headline .green, .green { color: #34a853; }
+      .headline .blue, .blue { color: #4285f4; }
+      .subline {
+        font-size: 44px;
+        line-height: 1.18;
         font-weight: 700;
+        color: #475569;
         text-align: center;
-        text-transform: uppercase;
       }
-      .word {
+      .letter, .word {
         display: inline-block;
-        text-shadow: 0 0 36px rgba(0, 212, 255, 0.8);
+        transform-origin: 50% 70%;
       }
-      .cyan { color: #00d4ff; }
-      .blue { color: #5ea0ff; }
-      .red { color: #ff3158; text-shadow: 0 0 32px rgba(255,49,88,0.78); }
-      .green { color: #49ff91; text-shadow: 0 0 42px rgba(73,255,145,0.8); }
+      .android-mark {
+        position: absolute;
+        width: 220px;
+        height: 220px;
+        transform-style: preserve-3d;
+      }
+      .android-body {
+        position: absolute;
+        left: 38px;
+        top: 70px;
+        width: 144px;
+        height: 116px;
+        border-radius: 34px 34px 24px 24px;
+        background: #3ddc84;
+        box-shadow: 0 22px 58px rgba(61, 220, 132, 0.35);
+      }
+      .android-head {
+        position: absolute;
+        left: 38px;
+        top: 22px;
+        width: 144px;
+        height: 86px;
+        border-radius: 86px 86px 22px 22px;
+        background: #3ddc84;
+      }
+      .android-head::before,
+      .android-head::after {
+        content: "";
+        position: absolute;
+        top: 32px;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: #ffffff;
+      }
+      .android-head::before { left: 42px; }
+      .android-head::after { right: 42px; }
+      .antenna {
+        position: absolute;
+        top: 4px;
+        width: 8px;
+        height: 46px;
+        border-radius: 8px;
+        background: #3ddc84;
+        transform-origin: bottom center;
+      }
+      .antenna.a { left: 70px; transform: rotate(-28deg); }
+      .antenna.b { right: 70px; transform: rotate(28deg); }
       .phone {
         position: absolute;
-        width: 366px;
-        height: 760px;
-        border: 13px solid #111722;
-        border-radius: 54px;
-        background: #090c12;
+        width: 360px;
+        height: 744px;
+        border: 11px solid #1f2937;
+        border-radius: 48px;
+        background: #111827;
         box-shadow:
-          0 0 0 2px rgba(0,212,255,0.28),
-          0 0 52px rgba(0,212,255,0.46),
-          0 44px 120px rgba(0,0,0,0.8);
+          0 0 0 2px rgba(61, 220, 132, 0.34),
+          0 34px 76px rgba(15, 23, 42, 0.18);
         overflow: hidden;
+        transform-style: preserve-3d;
       }
       .phone::before {
         content: "";
         position: absolute;
-        z-index: 9;
-        top: 18px;
+        z-index: 10;
         left: 50%;
-        width: 112px;
-        height: 20px;
+        top: 17px;
+        width: 98px;
+        height: 18px;
         border-radius: 18px;
-        background: #050609;
         transform: translateX(-50%);
+        background: #111827;
       }
       .screen {
         position: absolute;
         inset: 0;
-        padding: 58px 24px 26px;
+        padding: 58px 24px 28px;
         background:
-          radial-gradient(circle at 50% 18%, rgba(0,212,255,0.16), transparent 34%),
-          linear-gradient(180deg, #111827, #05070a);
+          radial-gradient(circle at 26% 14%, rgba(61, 220, 132, 0.18), transparent 30%),
+          linear-gradient(180deg, #ffffff, #f8fafc);
       }
       .status {
-        height: 34px;
         display: flex;
         justify-content: space-between;
-        color: rgba(245,251,255,0.75);
+        height: 34px;
+        color: #64748b;
         font-size: 15px;
-        font-weight: 800;
+        font-weight: 700;
       }
       .app-title {
-        margin: 18px 0;
-        color: #f5fbff;
-        font-size: 31px;
+        margin: 19px 0 18px;
+        font-size: 32px;
+        line-height: 1;
         font-weight: 900;
+        color: #202124;
       }
-      .ui-row, .ui-tile, .msg {
-        border: 1px solid rgba(0,212,255,0.18);
+      .ui-row, .ui-tile, .message {
         border-radius: 8px;
-        background: rgba(255,255,255,0.07);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+        background: #ffffff;
+        border: 1px solid rgba(148, 163, 184, 0.36);
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
       }
       .ui-row {
+        position: relative;
         height: 72px;
         margin: 14px 0;
-        padding: 16px;
-        color: #eaf9ff;
+        padding: 17px 18px;
+        color: #334155;
         font-size: 22px;
-        font-weight: 800;
+        font-weight: 700;
+        overflow: hidden;
+      }
+      .ui-row.active {
+        border-color: rgba(61, 220, 132, 0.95);
+        background: linear-gradient(90deg, rgba(61, 220, 132, 0.2), #ffffff);
       }
       .ui-grid {
         display: grid;
@@ -183,261 +244,412 @@
         gap: 12px;
       }
       .ui-tile {
-        height: 86px;
+        height: 84px;
         display: grid;
         place-items: center;
-        color: #eaf9ff;
-        font-size: 27px;
+        font-size: 28px;
         font-weight: 900;
-      }
-      .cursor {
-        position: absolute;
-        z-index: 12;
-        width: 34px;
-        height: 34px;
-        border: 3px solid #49ff91;
-        border-radius: 50%;
-        box-shadow: 0 0 24px #49ff91, inset 0 0 14px rgba(73,255,145,0.5);
-        opacity: 0;
-      }
-      .ai-ray {
-        position: absolute;
-        z-index: 11;
-        width: 220px;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, #00d4ff, #49ff91);
-        box-shadow: 0 0 20px #00d4ff;
-        transform-origin: left center;
-        opacity: 0;
+        color: #334155;
       }
       .success {
         position: absolute;
-        z-index: 13;
+        z-index: 14;
         left: 50%;
-        bottom: 42px;
+        bottom: 38px;
         transform: translateX(-50%);
         padding: 12px 18px;
-        border: 1px solid rgba(73,255,145,0.64);
         border-radius: 8px;
-        color: #49ff91;
-        background: rgba(8, 20, 14, 0.88);
-        box-shadow: 0 0 34px rgba(73,255,145,0.48);
+        background: #34a853;
+        color: #ffffff;
+        box-shadow: 0 14px 36px rgba(52, 168, 83, 0.32);
         font-size: 20px;
         font-weight: 900;
         opacity: 0;
       }
-      .metric {
+      .cursor {
         position: absolute;
-        text-align: center;
-        font-family: "Space Grotesk", Inter, sans-serif;
-        font-weight: 700;
-        line-height: 0.9;
+        z-index: 16;
+        width: 36px;
+        height: 36px;
+        border: 4px solid #4285f4;
+        border-radius: 50%;
+        background: rgba(66, 133, 244, 0.1);
+        box-shadow: 0 0 0 10px rgba(66, 133, 244, 0.08), 0 12px 30px rgba(66, 133, 244, 0.35);
+        opacity: 0;
       }
-      .num {
-        font-size: 190px;
-        color: #49ff91;
-        text-shadow: 0 0 52px rgba(73,255,145,0.75);
-      }
-      .label {
-        margin-top: 22px;
-        font-size: 38px;
-        font-weight: 900;
-        color: #d7f8ff;
-        text-transform: uppercase;
-      }
-      .comparison {
-        position: absolute;
-        width: 520px;
-        height: 250px;
-        border: 2px solid rgba(0,212,255,0.6);
-        border-radius: 8px;
-        box-shadow: 0 0 44px rgba(0,212,255,0.36);
-        background: rgba(2,8,18,0.78);
-      }
-      .comparison.after {
-        border-color: rgba(73,255,145,0.72);
-        box-shadow: 0 0 54px rgba(73,255,145,0.42);
-      }
-      .compare-num {
-        font-family: "Space Grotesk", Inter, sans-serif;
-        font-size: 98px;
-        line-height: 1;
-        text-align: center;
-        padding-top: 54px;
-        font-weight: 700;
-      }
-      .task-rush {
+      .connections {
         position: absolute;
         inset: 0;
+        z-index: 6;
+        pointer-events: none;
+      }
+      .conn {
+        fill: none;
+        stroke: url(#connGradient);
+        stroke-width: 5;
+        stroke-linecap: round;
+        stroke-dasharray: 18 18;
+        opacity: 0;
+      }
+      .pill-row {
+        position: absolute;
+        display: flex;
+        gap: 24px;
+      }
+      .pill {
+        padding: 20px 28px;
+        min-width: 230px;
+        border-radius: 8px;
+        background: #ffffff;
+        border: 1px solid rgba(61, 220, 132, 0.38);
+        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
+        color: #202124;
+        font-size: 30px;
+        font-weight: 900;
+        text-align: center;
+      }
+      .metric-main {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 118px;
+        text-align: center;
+      }
+      .metric-number {
+        font-size: 232px;
+        line-height: 0.86;
+        font-weight: 900;
+        color: #34a853;
+        text-shadow: 0 20px 60px rgba(52, 168, 83, 0.18);
+      }
+      .metric-label {
+        margin-top: 22px;
+        font-size: 42px;
+        line-height: 1.1;
+        font-weight: 900;
+        color: #334155;
+        text-transform: uppercase;
+      }
+      .metric-card {
+        position: absolute;
+        width: 372px;
+        height: 188px;
+        padding: 30px;
+        border-radius: 8px;
+        background: #ffffff;
+        border: 1px solid rgba(148, 163, 184, 0.26);
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.1);
+        text-align: center;
+      }
+      .metric-card .value {
+        font-size: 72px;
+        line-height: 1;
+        font-weight: 900;
+      }
+      .metric-card .caption {
+        margin-top: 14px;
+        font-size: 22px;
+        font-weight: 900;
+        color: #64748b;
+        text-transform: uppercase;
+      }
+      .check-list {
+        position: absolute;
+        left: 682px;
+        bottom: 104px;
+        display: flex;
+        gap: 22px;
+      }
+      .check {
+        width: 82px;
+        height: 82px;
+        border-radius: 50%;
         display: grid;
         place-items: center;
+        background: #3ddc84;
+        box-shadow: 0 14px 34px rgba(61, 220, 132, 0.28);
+        color: #ffffff;
+        font-size: 44px;
+        font-weight: 900;
       }
       .mini-phone {
         position: absolute;
-        width: 302px;
-        height: 620px;
-        border: 10px solid #101722;
+        width: 306px;
+        height: 626px;
+        border: 9px solid #1f2937;
         border-radius: 42px;
-        background: #07090d;
-        box-shadow: 0 0 42px rgba(73,255,145,0.36);
+        background: #111827;
+        box-shadow: 0 26px 64px rgba(15, 23, 42, 0.16);
         overflow: hidden;
         opacity: 0;
       }
-      .mini-phone .screen { padding: 48px 20px 22px; }
+      .mini-phone .screen { padding: 50px 20px 22px; }
       .mini-phone .app-title { font-size: 27px; }
+      .mini-phone .ui-row { height: 63px; font-size: 19px; }
+      .badge {
+        position: absolute;
+        right: 18px;
+        top: 82px;
+        z-index: 16;
+        padding: 10px 13px;
+        border-radius: 8px;
+        background: #34a853;
+        color: #ffffff;
+        font-weight: 900;
+        font-size: 16px;
+        box-shadow: 0 12px 26px rgba(52, 168, 83, 0.28);
+        opacity: 0;
+      }
       .ending-mark {
         position: absolute;
         left: 0;
         right: 0;
-        bottom: 72px;
+        bottom: 74px;
         text-align: center;
-        color: rgba(245,251,255,0.72);
-        font-size: 26px;
+        color: #64748b;
+        font-size: 28px;
         font-weight: 900;
-        letter-spacing: 0;
         text-transform: uppercase;
       }
-      .flash {
+      .white-flash {
         inset: 0;
-        z-index: 80;
-        background: #e9fbff;
+        z-index: 94;
+        background: #ffffff;
         opacity: 0;
+        pointer-events: none;
       }
-      @keyframes gridMove {
+      @keyframes materialGrid {
         from { background-position: 0 0, 0 0; }
-        to { background-position: 0 116px, 116px 0; }
+        to { background-position: 144px 72px, 72px 144px; }
       }
-      @keyframes particleDrift {
-        from { transform: translate3d(0,0,0) scale(0.6); opacity: 0.18; }
-        to { transform: translate3d(52px,-86px,0) scale(1.45); opacity: 0.82; }
+      @keyframes waveDash {
+        to { stroke-dashoffset: -168; }
       }
-      @keyframes glowPulse {
-        0%, 100% { filter: brightness(0.8); box-shadow: 0 0 0 rgba(0,212,255,0); }
-        50% { filter: brightness(1.5); box-shadow: 0 0 74px rgba(0,212,255,0.72); }
+      @keyframes blobMorph {
+        0% { border-radius: 44% 56% 62% 38% / 48% 42% 58% 52%; transform: rotate(0deg); }
+        50% { border-radius: 62% 38% 42% 58% / 36% 62% 38% 64%; }
+        100% { border-radius: 36% 64% 56% 44% / 58% 44% 56% 42%; transform: rotate(8deg); }
+      }
+      @keyframes gradientShift {
+        0%, 100% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+      }
+      @keyframes particlePath {
+        0% { transform: translate3d(0, 0, 0) scale(0.65); opacity: 0.2; }
+        45% { transform: translate3d(58px, -84px, 0) scale(1.15); opacity: 0.72; }
+        100% { transform: translate3d(-32px, -154px, 0) scale(0.95); opacity: 0.5; }
       }
     </style>
   </head>
   <body>
     <div id="root" data-composition-id="main" data-start="0" data-duration="30" data-width="1920" data-height="1080">
-      <div id="scanlines" class="clip scanlines" data-start="0" data-duration="30" data-track-index="95"></div>
-      <div id="vignette" class="clip vignette" data-start="0" data-duration="30" data-track-index="96"></div>
-      <div id="flash" class="clip flash" data-start="0" data-duration="30" data-track-index="90"></div>
-      <div id="particle-field" class="clip particles" data-start="0" data-duration="30" data-track-index="50">
-        <div class="particle" style="left: 190px; top: 780px"></div><div class="particle" style="left: 428px; top: 170px; animation-delay: .8s"></div><div class="particle" style="left: 770px; top: 880px; animation-delay: 1.4s"></div><div class="particle" style="left: 1180px; top: 180px; animation-delay: .2s"></div><div class="particle" style="left: 1510px; top: 760px; animation-delay: 1.9s"></div><div class="particle" style="left: 1725px; top: 320px; animation-delay: .5s"></div>
+      <svg id="waveField" class="clip wave-field" data-layout-allow-overflow data-start="0" data-duration="30" data-track-index="2" viewBox="0 0 1920 1080">
+        <path class="wave" d="M-80 770 C220 640 360 900 620 754 S1040 600 1270 746 S1640 910 2020 680" />
+        <path class="wave blue" d="M-120 305 C190 162 386 430 650 292 S1090 158 1328 318 S1670 472 2040 250" />
+      </svg>
+      <div id="softVignette" class="clip soft-vignette" data-start="0" data-duration="30" data-track-index="95"></div>
+      <div id="whiteFlash" class="clip white-flash" data-start="0" data-duration="30" data-track-index="94"></div>
+      <div id="particleField" class="clip particles" data-start="0" data-duration="30" data-track-index="60">
+        <div class="particle" style="left:172px;top:780px;animation-delay:.1s"></div>
+        <div class="particle" style="left:344px;top:242px;animation-delay:1.1s"></div>
+        <div class="particle" style="left:570px;top:910px;animation-delay:2.1s"></div>
+        <div class="particle" style="left:792px;top:168px;animation-delay:.6s"></div>
+        <div class="particle" style="left:1048px;top:834px;animation-delay:1.8s"></div>
+        <div class="particle" style="left:1260px;top:260px;animation-delay:.3s"></div>
+        <div class="particle" style="left:1510px;top:734px;animation-delay:1.5s"></div>
+        <div class="particle" style="left:1732px;top:342px;animation-delay:2.5s"></div>
       </div>
-      <div id="streakA" class="clip streak" data-start="0" data-duration="30" data-track-index="40" style="left:-820px;top:260px"></div>
-      <div id="streakB" class="clip streak" data-start="0" data-duration="30" data-track-index="41" style="left:1980px;top:790px"></div>
 
       <section id="hook" class="clip scene" data-layout-allow-overflow data-start="0" data-duration="3" data-track-index="10">
-        <div id="wakePhone" class="phone" style="left:777px;top:164px;transform:scale(.72)">
-          <div class="screen">
-            <div class="status"><span>9:41</span><span>AI</span></div>
-            <div class="app-title">Android</div>
-            <div class="ui-row">Settings</div><div class="ui-row">Clock</div><div class="ui-row">Calculator</div><div class="ui-row">Messages</div>
-          </div>
+        <div id="hookBlob" class="blob" style="left:746px;top:214px;width:426px;height:426px"></div>
+        <div id="hookBot" class="android-mark" style="left:850px;top:286px">
+          <div class="antenna a"></div><div class="antenna b"></div><div class="android-head"></div><div class="android-body"></div>
         </div>
-        <div id="mainTitle" class="title" style="opacity:0">ANDROID<br /><span class="cyan">CONTROL</span></div>
+        <div id="hookTitle" class="headline split-letters" style="position:absolute;left:0;right:0;top:444px;opacity:0">ANDROID<br /><span class="green">CONTROL</span></div>
       </section>
 
       <section id="problem" class="clip scene" data-start="3" data-duration="5" data-track-index="11">
-        <div id="problemText" class="huge" style="font-size:118px;max-width:1460px"><span class="word">BILLIONS</span> <span class="word red">OF PHONES</span><br /><span class="word">LOCKED</span> <span class="word red">BEHIND UI</span></div>
-        <div class="phone problem-phone" style="left:64px;top:185px;transform:rotate(-10deg) scale(.68)"><div class="screen"><div class="status"><span>12:08</span><span>LTE</span></div><div class="app-title">Settings</div><div class="ui-row">Network</div><div class="ui-row red">Permissions</div><div class="ui-row">Notifications</div></div></div>
-        <div class="phone problem-phone" style="right:74px;top:225px;transform:rotate(11deg) scale(.62)"><div class="screen"><div class="status"><span>7:16</span><span>5G</span></div><div class="app-title">Messages</div><div class="msg ui-row">Open thread</div><div class="msg ui-row">Send reply</div><div class="msg ui-row red">No API</div></div></div>
+        <div class="blob light problem-blob" style="left:210px;top:130px;width:520px;height:520px"></div>
+        <div class="blob light problem-blob" style="right:180px;bottom:82px;width:480px;height:480px"></div>
+        <div id="problemText" class="headline" style="position:absolute;left:0;right:0;top:308px;font-size:112px">
+          <span id="billions" class="split-letters">BILLIONS OF PHONES</span><br />
+          <span id="locked" style="display:inline-block;color:#64748b;filter:blur(8px);opacity:0">LOCKED BEHIND UI</span>
+        </div>
+        <div class="phone problem-phone" style="left:118px;top:186px;transform:rotateY(24deg) rotateZ(-7deg) scale(.72)">
+          <div class="screen"><div class="status"><span>12:08</span><span>5G</span></div><div class="app-title">Settings</div><div class="ui-row">Network</div><div class="ui-row">Permissions</div><div class="ui-row active">Notifications</div></div>
+        </div>
+        <div class="phone problem-phone" style="right:126px;top:210px;transform:rotateY(-24deg) rotateZ(8deg) scale(.68)">
+          <div class="screen"><div class="status"><span>7:16</span><span>LTE</span></div><div class="app-title">Messages</div><div class="ui-row">Open thread</div><div class="ui-row">Send reply</div><div class="ui-row">No API</div></div>
+        </div>
       </section>
 
       <section id="solution" class="clip scene" data-start="8" data-duration="7" data-track-index="12">
-        <div id="agentTitle" class="huge cyan" style="position:absolute;left:0;right:0;top:56px;font-size:128px">AI AGENTS</div>
-        <div id="agentPhone" class="phone" style="left:777px;top:232px">
+        <svg class="connections" viewBox="0 0 1920 1080">
+          <defs><linearGradient id="connGradient" x1="0" x2="1"><stop stop-color="#3ddc84" /><stop offset="1" stop-color="#4285f4" /></linearGradient></defs>
+          <path class="conn c1" d="M380 290 C590 220 686 426 846 392" />
+          <path class="conn c2" d="M1490 300 C1260 210 1240 414 1082 394" />
+          <path class="conn c3" d="M438 818 C620 690 740 744 850 668" />
+          <path class="conn c4" d="M1480 800 C1282 682 1226 748 1072 666" />
+        </svg>
+        <div id="solutionBlob" class="blob" style="left:262px;top:172px;width:710px;height:710px;opacity:.92"></div>
+        <div id="agentTitle" class="headline" style="position:absolute;left:0;right:0;top:70px;font-size:124px;opacity:0"><span class="green">AI</span> AGENTS</div>
+        <div id="agentPhone" class="phone" style="left:780px;top:220px">
           <div class="screen">
             <div class="status"><span>10:24</span><span>LLM</span></div>
             <div class="app-title">Autonomous UI</div>
-            <div class="ui-row target">Turn Wi-Fi on</div><div class="ui-row">Set alarm</div><div class="ui-row">Calculate 42 x 17</div><div class="ui-row">Text the update</div>
+            <div class="ui-row target">Turn Wi-Fi on</div>
+            <div class="ui-row">Set alarm</div>
+            <div class="ui-row">Calculate 42 x 17</div>
+            <div class="ui-row">Text the update</div>
             <div id="cursor" class="cursor"></div>
-            <div id="ray" class="ai-ray"></div>
+            <div class="success">DONE</div>
           </div>
         </div>
-        <div id="triad" class="huge" style="font-size:70px;position:absolute;bottom:90px"><span class="word">VISION</span> <span class="word cyan">+</span> <span class="word">REASONING</span> <span class="word cyan">+</span> <span class="word">ACTION</span></div>
+        <div id="triad" class="pill-row" style="left:452px;bottom:84px">
+          <div class="pill">VISION</div><div class="pill">REASONING</div><div class="pill">ACTION</div>
+        </div>
       </section>
 
       <section id="metrics" class="clip scene" data-start="15" data-duration="7" data-track-index="13">
-        <div class="comparison before" style="left:260px;top:235px"><div id="baseNum" class="compare-num">39%</div><div class="label">Zero-shot</div></div>
-        <div class="comparison after" style="right:260px;top:235px"><div id="trainedNum" class="compare-num green">53%</div><div class="label">Trained model</div></div>
-        <div id="gain" class="metric" style="left:0;right:0;top:555px"><div class="num">+35%</div><div class="label">relative improvement</div></div>
-        <div id="tasks" class="huge" style="font-size:88px;position:absolute;bottom:120px"><span class="green">116</span> ANDROID TASKS</div>
+        <div class="blob light" style="left:636px;top:82px;width:650px;height:650px"></div>
+        <div class="metric-main">
+          <div id="trainedCounter" class="metric-number">0%</div>
+          <div class="metric-label">Trained Android Control Accuracy</div>
+        </div>
+        <div class="metric-card baseline" style="left:244px;top:432px">
+          <div id="baselineCounter" class="value blue">0%</div>
+          <div class="caption">Zero-shot baseline</div>
+        </div>
+        <div class="metric-card gain" style="right:244px;top:432px">
+          <div id="gainCounter" class="value green">+0%</div>
+          <div class="caption">Relative improvement</div>
+        </div>
+        <div id="tasksText" class="headline" style="position:absolute;left:0;right:0;bottom:212px;font-size:82px;opacity:0"><span class="green">116</span> ANDROID TASKS</div>
+        <div class="check-list"><div class="check">✓</div><div class="check">✓</div><div class="check">✓</div><div class="check">✓</div><div class="check">✓</div></div>
       </section>
 
       <section id="montage" class="clip scene" data-start="22" data-duration="5" data-track-index="14">
-        <div class="task-rush">
-          <div class="mini-phone m1" style="left:190px;top:210px"><div class="screen"><div class="status"><span>8:02</span><span>OK</span></div><div class="app-title">Calculator</div><div class="ui-grid"><div class="ui-tile">7</div><div class="ui-tile">8</div><div class="ui-tile">9</div><div class="ui-tile">4</div><div class="ui-tile">5</div><div class="ui-tile">6</div><div class="ui-tile green">=</div></div><div class="success">SUCCESS</div></div></div>
-          <div class="mini-phone m2" style="left:610px;top:210px"><div class="screen"><div class="status"><span>8:03</span><span>OK</span></div><div class="app-title">Settings</div><div class="ui-row">Wi-Fi</div><div class="ui-row green">Enabled</div><div class="ui-row">Bluetooth</div><div class="success">SUCCESS</div></div></div>
-          <div class="mini-phone m3" style="right:610px;top:210px"><div class="screen"><div class="status"><span>8:04</span><span>OK</span></div><div class="app-title">Clock</div><div class="ui-row">Alarm</div><div class="ui-row green">7:30 AM</div><div class="ui-row">Save</div><div class="success">SUCCESS</div></div></div>
-          <div class="mini-phone m4" style="right:190px;top:210px"><div class="screen"><div class="status"><span>8:05</span><span>OK</span></div><div class="app-title">SMS</div><div class="ui-row">Compose</div><div class="ui-row green">Sent</div><div class="ui-row">Delivered</div><div class="success">SUCCESS</div></div></div>
+        <div class="mini-phone m1" style="left:178px;top:214px">
+          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:02</span><span>OK</span></div><div class="app-title">Calculator</div><div class="ui-grid"><div class="ui-tile">7</div><div class="ui-tile">8</div><div class="ui-tile">9</div><div class="ui-tile">4</div><div class="ui-tile">5</div><div class="ui-tile">6</div><div class="ui-tile green">=</div></div></div>
+        </div>
+        <div class="mini-phone m2" style="left:608px;top:214px">
+          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:03</span><span>OK</span></div><div class="app-title">Settings</div><div class="ui-row">Wi-Fi</div><div class="ui-row active">Enabled</div><div class="ui-row">Bluetooth</div></div>
+        </div>
+        <div class="mini-phone m3" style="right:608px;top:214px">
+          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:04</span><span>OK</span></div><div class="app-title">Clock</div><div class="ui-row">Alarm</div><div class="ui-row active">7:30 AM</div><div class="ui-row">Save</div></div>
+        </div>
+        <div class="mini-phone m4" style="right:178px;top:214px">
+          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:05</span><span>OK</span></div><div class="app-title">SMS</div><div class="ui-row">Compose</div><div class="ui-row active">Sent</div><div class="ui-row">Delivered</div></div>
         </div>
       </section>
 
       <section id="ending" class="clip scene" data-start="27" data-duration="3" data-track-index="15">
-        <div id="future" class="title">THE FUTURE<br /><span class="cyan">OF MOBILE</span></div>
+        <div id="endBlob" class="blob" style="left:760px;top:160px;width:400px;height:400px"></div>
+        <div id="endBot" class="android-mark" style="left:850px;top:250px">
+          <div class="antenna a"></div><div class="antenna b"></div><div class="android-head"></div><div class="android-body"></div>
+        </div>
+        <div id="future" class="headline split-letters" style="position:absolute;left:0;right:0;top:514px;opacity:0">THE FUTURE<br /><span class="green">OF MOBILE</span></div>
         <div class="ending-mark">CSULA AI RESEARCH · SPRING 2026</div>
       </section>
     </div>
+
     <script>
       window.__timelines = window.__timelines || {};
       if (window.gsap) {
         gsap.defaults({ ease: "power3.out" });
+
+        const splitLetters = (selector) => {
+          document.querySelectorAll(selector).forEach((node) => {
+            const original = node.innerHTML;
+            const parts = original.split(/(<br\s*\/?>)/i);
+            node.innerHTML = parts.map((part) => {
+              if (/^<br/i.test(part)) return part;
+              const tmp = document.createElement("span");
+              tmp.innerHTML = part;
+              const text = tmp.textContent || "";
+              return text.split("").map((char) => {
+                if (char === " ") return '<span class="letter">&nbsp;</span>';
+                return `<span class="letter">${char}</span>`;
+              }).join("");
+            }).join("");
+          });
+        };
+        splitLetters(".split-letters");
+
         const tl = gsap.timeline({ paused: true });
         window.__timelines.main = tl;
 
-        const countTo = (selector, value, suffix, start) => {
+        const countTo = (selector, value, suffix, start, prefix = "") => {
           const state = { n: 0 };
           tl.to(state, {
             n: value,
-            duration: 1.25,
-            ease: "power4.out",
-            onUpdate: () => { document.querySelector(selector).textContent = Math.round(state.n) + suffix; }
+            duration: 1.35,
+            ease: "elastic.out(1, 0.55)",
+            onUpdate: () => { document.querySelector(selector).textContent = prefix + Math.round(state.n) + suffix; }
           }, start);
         };
 
-        tl.fromTo("#wakePhone", { opacity: 0, scale: 0.36, filter: "brightness(0)" }, { opacity: 1, scale: 0.82, filter: "brightness(1.45)", duration: 0.7 }, 0.15)
-          .to("#wakePhone", { boxShadow: "0 0 120px rgba(0,212,255,.95)", duration: 0.38, yoyo: true, repeat: 1 }, 0.75)
-          .to("#wakePhone", { scale: 1.8, opacity: 0, filter: "blur(10px)", duration: 0.55 }, 1.48)
-          .fromTo("#mainTitle", { opacity: 0, scale: 3.2, rotateX: 35, filter: "blur(18px)" }, { opacity: 1, scale: 1, rotateX: 0, filter: "blur(0)", duration: 0.36, ease: "expo.out" }, 1.72)
-          .fromTo("#streakA", { x: 0, opacity: 0 }, { x: 2900, opacity: 1, duration: 0.7, ease: "power4.in" }, 1.72)
-          .to("#mainTitle", { scale: 5.2, opacity: 0, filter: "blur(18px)", duration: 0.55, ease: "power4.in" }, 2.45);
+        gsap.set(["#problem", "#solution", "#metrics", "#montage", "#ending"], { opacity: 1 });
+        gsap.set("#triad .pill, .metric-card, .check", { opacity: 0 });
 
-        tl.fromTo("#problemText .word", { opacity: 0, y: 100, skewX: -14, filter: "blur(10px)" }, { opacity: 1, y: 0, skewX: 0, filter: "blur(0)", duration: 0.42, stagger: 0.11 }, 3.05)
-          .fromTo(".problem-phone", { opacity: 0, y: 180, filter: "blur(8px)" }, { opacity: 1, y: 0, filter: "blur(0)", duration: 0.6, stagger: 0.14 }, 3.35)
-          .to("#problemText .word", { x: () => gsap.utils.random(-80, 80), y: () => gsap.utils.random(-46, 46), rotate: () => gsap.utils.random(-8, 8), duration: 0.16, yoyo: true, repeat: 7, ease: "steps(1)" }, 4.35)
-          .to(".problem-phone", { x: () => gsap.utils.random(-36, 36), duration: 0.1, yoyo: true, repeat: 9, ease: "steps(1)" }, 5.2)
-          .to("#flash", { opacity: 1, duration: 0.12, yoyo: true, repeat: 1 }, 7.86);
+        tl.fromTo("#hookBlob", { scale: 0, rotate: -70, filter: "blur(22px)" }, { scale: 1, rotate: 0, filter: "blur(0)", duration: 0.85, ease: "elastic.out(1, 0.5)" }, 0.05)
+          .fromTo("#hookBot", { opacity: 0, y: 120, scale: 0.35, rotateY: -70 }, { opacity: 1, y: 0, scale: 1, rotateY: 0, duration: 0.72, ease: "back.out(1.7)" }, 0.34)
+          .fromTo("#hookTitle", { opacity: 0, y: 170 }, { opacity: 1, y: 0, duration: 0.2 }, 0.92)
+          .fromTo("#hookTitle .letter", { opacity: 0, y: 90, rotateX: 70, scale: 0.6 }, { opacity: 1, y: 0, rotateX: 0, scale: 1, duration: 0.62, stagger: 0.017, ease: "elastic.out(1, 0.5)" }, 0.96)
+          .to("#particleField .particle", { scale: 2.4, opacity: 1, x: () => gsap.utils.random(-120, 120), y: () => gsap.utils.random(-110, 80), duration: 0.46, stagger: 0.035, ease: "back.out(2)" }, 1.05)
+          .to("#hook", { y: -92, scale: 1.18, opacity: 0, filter: "blur(18px)", duration: 0.68, ease: "power4.in" }, 2.36)
+          .set("#hook", { opacity: 0, visibility: "hidden" }, 3.0);
 
-        tl.fromTo("#agentTitle", { opacity: 0, scale: 0.72, y: -64, filter: "blur(14px)" }, { opacity: 1, scale: 1, y: 0, filter: "blur(0)", duration: 0.55, ease: "expo.out" }, 8.05)
-          .fromTo("#agentPhone", { opacity: 0, y: 180, rotateY: -30, scale: 0.76 }, { opacity: 1, y: 0, rotateY: 0, scale: 1, duration: 0.8 }, 8.4)
-          .fromTo("#cursor", { opacity: 0, left: 250, top: 150, scale: 0.3 }, { opacity: 1, left: 62, top: 158, scale: 1, duration: 0.45 }, 9.32)
-          .to("#ray", { opacity: 1, left: 88, top: 175, rotate: 18, duration: 0.25 }, 9.55)
-          .to("#cursor", { left: 248, top: 265, duration: 0.52, ease: "power2.inOut" }, 10.05)
-          .to("#cursor", { scale: 1.8, duration: 0.12, yoyo: true, repeat: 1 }, 10.55)
-          .to("#agentPhone .target", { color: "#49ff91", boxShadow: "0 0 34px rgba(73,255,145,.45)", borderColor: "rgba(73,255,145,.8)", duration: 0.35 }, 10.58)
-          .fromTo("#triad .word", { opacity: 0, y: 72, scale: 0.6 }, { opacity: 1, y: 0, scale: 1, duration: 0.34, stagger: 0.22, ease: "back.out(2.6)" }, 11.0)
-          .to("#solution", { scale: 1.18, opacity: 0, filter: "blur(14px)", duration: 0.55, ease: "power4.in" }, 14.45);
+        tl.fromTo(".problem-phone", { opacity: 0, y: 190, rotateX: 35, filter: "blur(10px)" }, { opacity: 1, y: 0, rotateX: 0, filter: "blur(0)", duration: 0.72, stagger: 0.18, ease: "back.out(1.7)" }, 3.05)
+          .fromTo("#billions .letter", { opacity: 0, y: 70, rotateZ: 10 }, { opacity: 1, y: 0, rotateZ: 0, duration: 0.36, stagger: 0.025, ease: "back.out(2.4)" }, 3.28)
+          .to("#locked", { opacity: 1, filter: "blur(0)", y: 0, duration: 0.72, ease: "power3.out" }, 4.55)
+          .to(".problem-blob", { x: (i) => i ? -130 : 120, y: (i) => i ? -60 : 72, scale: 1.15, duration: 2.4, ease: "sine.inOut" }, 4.2)
+          .to(".problem-phone", { rotateY: (i) => i ? -12 : 12, y: -22, duration: 1.7, yoyo: true, repeat: 1, ease: "sine.inOut" }, 4.7)
+          .to("#problem", { rotateY: -16, x: -230, opacity: 0, filter: "blur(14px)", duration: 0.62, ease: "power4.in" }, 7.38)
+          .set("#problem", { opacity: 0, visibility: "hidden" }, 8.0)
+          .to("#whiteFlash", { opacity: 0.8, duration: 0.08, yoyo: true, repeat: 1 }, 7.82);
 
-        countTo("#baseNum", 39, "%", 15.15);
-        countTo("#trainedNum", 53, "%", 15.45);
-        tl.fromTo(".comparison", { opacity: 0, y: 100, scale: 0.86 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, stagger: 0.18 }, 15.0)
-          .fromTo("#gain", { opacity: 0, scale: 0.2, filter: "blur(18px)" }, { opacity: 1, scale: 1, filter: "blur(0)", duration: 0.45, ease: "back.out(2.8)" }, 16.8)
-          .fromTo("#tasks", { opacity: 0, y: 80 }, { opacity: 1, y: 0, duration: 0.45 }, 18.2)
-          .to("#gain", { scale: 1.08, duration: 0.22, yoyo: true, repeat: 5 }, 18.65)
-          .to("#metrics", { y: -90, opacity: 0, filter: "blur(10px)", duration: 0.5 }, 21.45);
+        tl.fromTo("#solutionBlob", { x: -420, scale: 0.72, rotate: -28, opacity: 0 }, { x: 0, scale: 1, rotate: 0, opacity: 0.92, duration: 0.9, ease: "elastic.out(1, 0.55)" }, 8.02)
+          .fromTo("#agentTitle", { scale: 0.44, rotate: -10, y: -80, filter: "blur(14px)" }, { opacity: 1, scale: 1, rotate: 0, y: 0, filter: "blur(0)", duration: 0.64, ease: "back.out(1.7)" }, 8.22)
+          .fromTo("#agentPhone", { opacity: 0, x: 430, y: 90, rotateY: -42, scale: 0.74 }, { opacity: 1, x: 0, y: 0, rotateY: 0, scale: 1, duration: 0.9, ease: "elastic.out(1, 0.55)" }, 8.66)
+          .to(".conn", { opacity: 1, strokeDashoffset: -180, duration: 1.2, stagger: 0.12, ease: "power2.inOut" }, 9.06)
+          .fromTo("#cursor", { opacity: 0, left: 250, top: 150, scale: 0.2 }, { opacity: 1, left: 62, top: 158, scale: 1, duration: 0.5, ease: "back.out(2)" }, 9.5)
+          .to("#cursor", { left: 248, top: 265, duration: 0.58, ease: "power2.inOut" }, 10.18)
+          .to("#cursor", { scale: 1.78, duration: 0.12, yoyo: true, repeat: 1, ease: "power1.inOut" }, 10.72)
+          .to("#agentPhone .target", { className: "ui-row target active", duration: 0.24 }, 10.76)
+          .to("#agentPhone .success", { opacity: 1, y: -8, duration: 0.34, ease: "back.out(2.4)" }, 10.95)
+          .fromTo("#triad .pill", { y: 84, rotateX: 55, scale: 0.56 }, { opacity: 1, y: 0, rotateX: 0, scale: 1, duration: 0.54, stagger: 0.2, ease: "elastic.out(1, 0.5)" }, 11.22)
+          .to("#solution", { scale: 1.13, rotateY: 18, x: 220, opacity: 0, filter: "blur(16px)", duration: 0.68, ease: "power4.in" }, 14.22)
+          .set("#solution", { opacity: 0, visibility: "hidden" }, 15.0);
 
-        tl.fromTo(".mini-phone", { opacity: 0, y: 160, scale: 0.58, rotate: -8 }, { opacity: 1, y: 0, scale: 1, rotate: 0, duration: 0.32, stagger: 0.48, ease: "power4.out" }, 22.05)
-          .to(".mini-phone .success", { opacity: 1, duration: 0.16, stagger: 0.48 }, 22.45)
-          .to(".mini-phone", { x: () => gsap.utils.random(-40, 40), scale: 1.05, duration: 0.12, yoyo: true, repeat: 11, ease: "steps(1)" }, 23.2)
-          .to("#montage", { scale: 1.45, opacity: 0, filter: "blur(16px)", duration: 0.5 }, 26.45);
+        countTo("#trainedCounter", 53, "%", 15.15);
+        countTo("#baselineCounter", 39, "%", 15.28);
+        countTo("#gainCounter", 35, "%", 16.35, "+");
+        tl.fromTo(".metric-main", { opacity: 0, scale: 0.5, y: 90, filter: "blur(22px)" }, { opacity: 1, scale: 1, y: 0, filter: "blur(0)", duration: 0.76, ease: "elastic.out(1, 0.55)" }, 15.0)
+          .fromTo(".metric-card", { y: 120, rotateX: 60, scale: 0.72 }, { opacity: 1, y: 0, rotateX: 0, scale: 1, duration: 0.58, stagger: 0.18, ease: "back.out(1.7)" }, 15.44)
+          .fromTo("#tasksText", { y: 78, scale: 0.86, filter: "blur(12px)" }, { opacity: 1, y: 0, scale: 1, filter: "blur(0)", duration: 0.52, ease: "back.out(1.7)" }, 17.64)
+          .fromTo(".check", { scale: 0, rotate: -80 }, { opacity: 1, scale: 1, rotate: 0, duration: 0.46, stagger: 0.12, ease: "bounce.out" }, 18.12)
+          .to(".metric-number", { scale: 1.08, duration: 0.18, yoyo: true, repeat: 5, ease: "sine.inOut" }, 18.7)
+          .to("#metrics", { y: -160, opacity: 0, filter: "blur(14px)", duration: 0.64, ease: "power4.in" }, 21.24)
+          .set("#metrics", { opacity: 0, visibility: "hidden" }, 22.0);
 
-        tl.fromTo("#future", { opacity: 0, scale: 0.4, filter: "blur(22px)" }, { opacity: 1, scale: 1, filter: "blur(0)", duration: 0.62, ease: "expo.out" }, 27.0)
-          .fromTo(".ending-mark", { opacity: 0, y: 34 }, { opacity: 1, y: 0, duration: 0.5 }, 27.45)
-          .fromTo("#streakB", { x: 0, opacity: 0 }, { x: -3000, opacity: 1, duration: 0.85, ease: "power4.in" }, 27.72)
-          .to("#future", { scale: 1.12, textShadow: "0 0 90px rgba(0,212,255,1)", duration: 1.0 }, 28.0)
-          .to("#ending", { opacity: 0, filter: "blur(12px)", duration: 0.75 }, 29.2);
+        tl.fromTo(".mini-phone", { opacity: 0, y: 210, rotateY: -34, rotateZ: -8, scale: 0.58 }, { opacity: 1, y: 0, rotateY: 0, rotateZ: 0, scale: 1, duration: 0.44, stagger: 0.28, ease: "back.out(1.9)" }, 22.02)
+          .to(".mini-phone .badge", { opacity: 1, y: 8, duration: 0.18, stagger: 0.28, ease: "back.out(2)" }, 22.34)
+          .to(".mini-phone", { x: (i) => [-48, 34, -28, 46][i], y: (i) => [18, -26, 22, -18][i], rotateZ: (i) => [-4, 3, -3, 4][i], duration: 0.58, stagger: 0.08, yoyo: true, repeat: 3, ease: "sine.inOut" }, 23.08)
+          .to(".mini-phone", { scale: 1.08, boxShadow: "0 28px 74px rgba(52,168,83,.26)", duration: 0.18, stagger: 0.18, yoyo: true, repeat: 1 }, 24.4)
+          .to("#montage", { rotateY: -28, x: -360, scale: 1.22, opacity: 0, filter: "blur(16px)", duration: 0.66, ease: "power4.in" }, 26.24)
+          .set("#montage", { opacity: 0, visibility: "hidden" }, 27.0);
+
+        tl.fromTo("#endBlob", { scale: 0, rotate: -80, filter: "blur(18px)" }, { scale: 1, rotate: 0, filter: "blur(0)", duration: 0.74, ease: "elastic.out(1, 0.5)" }, 27.0)
+          .fromTo("#endBot", { opacity: 0, scale: 0.54, rotateY: 70, y: 60 }, { opacity: 1, scale: 1, rotateY: 0, y: 0, duration: 0.64, ease: "back.out(1.7)" }, 27.16)
+          .to("#future", { opacity: 1, duration: 0.1 }, 27.42)
+          .fromTo("#future .letter", { opacity: 0, y: 70, rotateX: 55 }, { opacity: 1, y: 0, rotateX: 0, duration: 0.44, stagger: 0.015, ease: "elastic.out(1, 0.5)" }, 27.42)
+          .fromTo(".ending-mark", { opacity: 0, y: 34 }, { opacity: 1, y: 0, duration: 0.45 }, 28.08)
+          .to("#future", { textShadow: "0 20px 80px rgba(61,220,132,.28)", scale: 1.04, duration: 0.72, ease: "sine.inOut" }, 28.44)
+          .to("#particleField .particle", { opacity: 1, scale: 2.8, y: -240, duration: 0.8, stagger: 0.035, ease: "power3.in" }, 28.76)
+          .to("#ending", { opacity: 0, filter: "blur(12px)", duration: 0.62 }, 29.36)
+          .set("#ending", { opacity: 0, visibility: "hidden" }, 30.0)
+          .to("#whiteFlash", { opacity: 1, duration: 0.5 }, 29.5);
       }
     </script>
   </body>
