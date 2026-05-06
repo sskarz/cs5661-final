@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@700;800;900&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet" />
+    <script src="assets/gsap.min.js"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        width: 1920px;
+        height: 1080px;
+        margin: 0;
+        overflow: hidden;
+        background: #0a0a0a;
+        color: #f5fbff;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 52% 48%, rgba(0, 102, 255, 0.16), transparent 30%),
+          radial-gradient(circle at 18% 84%, rgba(0, 212, 255, 0.12), transparent 28%),
+          linear-gradient(180deg, #050505 0%, #0a0a0d 58%, #020203 100%);
+      }
+      #root::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0,212,255,0.045) 1px, transparent 1px);
+        background-size: 58px 58px;
+        mask-image: radial-gradient(circle at center, black 0 55%, transparent 82%);
+        animation: gridMove 3.6s linear infinite;
+      }
+      .clip { position: absolute; }
+      .scene {
+        inset: 0;
+        overflow: visible;
+        display: grid;
+        place-items: center;
+      }
+      .vignette {
+        inset: 0;
+        z-index: 99;
+        pointer-events: none;
+        background:
+          radial-gradient(circle at center, transparent 42%, rgba(0,0,0,0.66) 100%),
+          linear-gradient(180deg, rgba(255,255,255,0.06), transparent 10%, transparent 88%, rgba(255,255,255,0.05));
+      }
+      .scanlines {
+        inset: 0;
+        z-index: 98;
+        opacity: 0.22;
+        pointer-events: none;
+        background: repeating-linear-gradient(180deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 5px);
+        mix-blend-mode: overlay;
+      }
+      .streak {
+        width: 760px;
+        height: 4px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, transparent, #00d4ff, #fff, transparent);
+        filter: blur(1px) drop-shadow(0 0 18px #00d4ff);
+        transform: rotate(-18deg);
+        opacity: 0;
+      }
+      .particles {
+        inset: 0;
+        pointer-events: none;
+        z-index: 55;
+      }
+      .particle {
+        position: absolute;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #00d4ff;
+        box-shadow: 0 0 16px #00d4ff;
+        opacity: 0.8;
+        animation: particleDrift 5s ease-in-out infinite alternate;
+      }
+      .title {
+        font-family: "Space Grotesk", Inter, sans-serif;
+        font-size: 164px;
+        line-height: 0.84;
+        letter-spacing: 0;
+        text-align: center;
+        font-weight: 700;
+        text-transform: uppercase;
+        text-shadow:
+          0 0 18px rgba(0, 212, 255, 0.92),
+          0 0 70px rgba(0, 102, 255, 0.8);
+      }
+      .huge {
+        font-family: "Space Grotesk", Inter, sans-serif;
+        font-size: 146px;
+        line-height: 0.9;
+        letter-spacing: 0;
+        font-weight: 700;
+        text-align: center;
+        text-transform: uppercase;
+      }
+      .word {
+        display: inline-block;
+        text-shadow: 0 0 36px rgba(0, 212, 255, 0.8);
+      }
+      .cyan { color: #00d4ff; }
+      .blue { color: #5ea0ff; }
+      .red { color: #ff3158; text-shadow: 0 0 32px rgba(255,49,88,0.78); }
+      .green { color: #49ff91; text-shadow: 0 0 42px rgba(73,255,145,0.8); }
+      .phone {
+        position: absolute;
+        width: 366px;
+        height: 760px;
+        border: 13px solid #111722;
+        border-radius: 54px;
+        background: #090c12;
+        box-shadow:
+          0 0 0 2px rgba(0,212,255,0.28),
+          0 0 52px rgba(0,212,255,0.46),
+          0 44px 120px rgba(0,0,0,0.8);
+        overflow: hidden;
+      }
+      .phone::before {
+        content: "";
+        position: absolute;
+        z-index: 9;
+        top: 18px;
+        left: 50%;
+        width: 112px;
+        height: 20px;
+        border-radius: 18px;
+        background: #050609;
+        transform: translateX(-50%);
+      }
+      .screen {
+        position: absolute;
+        inset: 0;
+        padding: 58px 24px 26px;
+        background:
+          radial-gradient(circle at 50% 18%, rgba(0,212,255,0.16), transparent 34%),
+          linear-gradient(180deg, #111827, #05070a);
+      }
+      .status {
+        height: 34px;
+        display: flex;
+        justify-content: space-between;
+        color: rgba(245,251,255,0.75);
+        font-size: 15px;
+        font-weight: 800;
+      }
+      .app-title {
+        margin: 18px 0;
+        color: #f5fbff;
+        font-size: 31px;
+        font-weight: 900;
+      }
+      .ui-row, .ui-tile, .msg {
+        border: 1px solid rgba(0,212,255,0.18);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.07);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+      }
+      .ui-row {
+        height: 72px;
+        margin: 14px 0;
+        padding: 16px;
+        color: #eaf9ff;
+        font-size: 22px;
+        font-weight: 800;
+      }
+      .ui-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .ui-tile {
+        height: 86px;
+        display: grid;
+        place-items: center;
+        color: #eaf9ff;
+        font-size: 27px;
+        font-weight: 900;
+      }
+      .cursor {
+        position: absolute;
+        z-index: 12;
+        width: 34px;
+        height: 34px;
+        border: 3px solid #49ff91;
+        border-radius: 50%;
+        box-shadow: 0 0 24px #49ff91, inset 0 0 14px rgba(73,255,145,0.5);
+        opacity: 0;
+      }
+      .ai-ray {
+        position: absolute;
+        z-index: 11;
+        width: 220px;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #00d4ff, #49ff91);
+        box-shadow: 0 0 20px #00d4ff;
+        transform-origin: left center;
+        opacity: 0;
+      }
+      .success {
+        position: absolute;
+        z-index: 13;
+        left: 50%;
+        bottom: 42px;
+        transform: translateX(-50%);
+        padding: 12px 18px;
+        border: 1px solid rgba(73,255,145,0.64);
+        border-radius: 8px;
+        color: #49ff91;
+        background: rgba(8, 20, 14, 0.88);
+        box-shadow: 0 0 34px rgba(73,255,145,0.48);
+        font-size: 20px;
+        font-weight: 900;
+        opacity: 0;
+      }
+      .metric {
+        position: absolute;
+        text-align: center;
+        font-family: "Space Grotesk", Inter, sans-serif;
+        font-weight: 700;
+        line-height: 0.9;
+      }
+      .num {
+        font-size: 190px;
+        color: #49ff91;
+        text-shadow: 0 0 52px rgba(73,255,145,0.75);
+      }
+      .label {
+        margin-top: 22px;
+        font-size: 38px;
+        font-weight: 900;
+        color: #d7f8ff;
+        text-transform: uppercase;
+      }
+      .comparison {
+        position: absolute;
+        width: 520px;
+        height: 250px;
+        border: 2px solid rgba(0,212,255,0.6);
+        border-radius: 8px;
+        box-shadow: 0 0 44px rgba(0,212,255,0.36);
+        background: rgba(2,8,18,0.78);
+      }
+      .comparison.after {
+        border-color: rgba(73,255,145,0.72);
+        box-shadow: 0 0 54px rgba(73,255,145,0.42);
+      }
+      .compare-num {
+        font-family: "Space Grotesk", Inter, sans-serif;
+        font-size: 98px;
+        line-height: 1;
+        text-align: center;
+        padding-top: 54px;
+        font-weight: 700;
+      }
+      .task-rush {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+      .mini-phone {
+        position: absolute;
+        width: 302px;
+        height: 620px;
+        border: 10px solid #101722;
+        border-radius: 42px;
+        background: #07090d;
+        box-shadow: 0 0 42px rgba(73,255,145,0.36);
+        overflow: hidden;
+        opacity: 0;
+      }
+      .mini-phone .screen { padding: 48px 20px 22px; }
+      .mini-phone .app-title { font-size: 27px; }
+      .ending-mark {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 72px;
+        text-align: center;
+        color: rgba(245,251,255,0.72);
+        font-size: 26px;
+        font-weight: 900;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+      .flash {
+        inset: 0;
+        z-index: 80;
+        background: #e9fbff;
+        opacity: 0;
+      }
+      @keyframes gridMove {
+        from { background-position: 0 0, 0 0; }
+        to { background-position: 0 116px, 116px 0; }
+      }
+      @keyframes particleDrift {
+        from { transform: translate3d(0,0,0) scale(0.6); opacity: 0.18; }
+        to { transform: translate3d(52px,-86px,0) scale(1.45); opacity: 0.82; }
+      }
+      @keyframes glowPulse {
+        0%, 100% { filter: brightness(0.8); box-shadow: 0 0 0 rgba(0,212,255,0); }
+        50% { filter: brightness(1.5); box-shadow: 0 0 74px rgba(0,212,255,0.72); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="30" data-width="1920" data-height="1080">
+      <div id="scanlines" class="clip scanlines" data-start="0" data-duration="30" data-track-index="95"></div>
+      <div id="vignette" class="clip vignette" data-start="0" data-duration="30" data-track-index="96"></div>
+      <div id="flash" class="clip flash" data-start="0" data-duration="30" data-track-index="90"></div>
+      <div id="particle-field" class="clip particles" data-start="0" data-duration="30" data-track-index="50">
+        <div class="particle" style="left: 190px; top: 780px"></div><div class="particle" style="left: 428px; top: 170px; animation-delay: .8s"></div><div class="particle" style="left: 770px; top: 880px; animation-delay: 1.4s"></div><div class="particle" style="left: 1180px; top: 180px; animation-delay: .2s"></div><div class="particle" style="left: 1510px; top: 760px; animation-delay: 1.9s"></div><div class="particle" style="left: 1725px; top: 320px; animation-delay: .5s"></div>
+      </div>
+      <div id="streakA" class="clip streak" data-start="0" data-duration="30" data-track-index="40" style="left:-820px;top:260px"></div>
+      <div id="streakB" class="clip streak" data-start="0" data-duration="30" data-track-index="41" style="left:1980px;top:790px"></div>
+
+      <section id="hook" class="clip scene" data-layout-allow-overflow data-start="0" data-duration="3" data-track-index="10">
+        <div id="wakePhone" class="phone" style="left:777px;top:164px;transform:scale(.72)">
+          <div class="screen">
+            <div class="status"><span>9:41</span><span>AI</span></div>
+            <div class="app-title">Android</div>
+            <div class="ui-row">Settings</div><div class="ui-row">Clock</div><div class="ui-row">Calculator</div><div class="ui-row">Messages</div>
+          </div>
+        </div>
+        <div id="mainTitle" class="title" style="opacity:0">ANDROID<br /><span class="cyan">CONTROL</span></div>
+      </section>
+
+      <section id="problem" class="clip scene" data-start="3" data-duration="5" data-track-index="11">
+        <div id="problemText" class="huge" style="font-size:118px;max-width:1460px"><span class="word">BILLIONS</span> <span class="word red">OF PHONES</span><br /><span class="word">LOCKED</span> <span class="word red">BEHIND UI</span></div>
+        <div class="phone problem-phone" style="left:64px;top:185px;transform:rotate(-10deg) scale(.68)"><div class="screen"><div class="status"><span>12:08</span><span>LTE</span></div><div class="app-title">Settings</div><div class="ui-row">Network</div><div class="ui-row red">Permissions</div><div class="ui-row">Notifications</div></div></div>
+        <div class="phone problem-phone" style="right:74px;top:225px;transform:rotate(11deg) scale(.62)"><div class="screen"><div class="status"><span>7:16</span><span>5G</span></div><div class="app-title">Messages</div><div class="msg ui-row">Open thread</div><div class="msg ui-row">Send reply</div><div class="msg ui-row red">No API</div></div></div>
+      </section>
+
+      <section id="solution" class="clip scene" data-start="8" data-duration="7" data-track-index="12">
+        <div id="agentTitle" class="huge cyan" style="position:absolute;left:0;right:0;top:56px;font-size:128px">AI AGENTS</div>
+        <div id="agentPhone" class="phone" style="left:777px;top:232px">
+          <div class="screen">
+            <div class="status"><span>10:24</span><span>LLM</span></div>
+            <div class="app-title">Autonomous UI</div>
+            <div class="ui-row target">Turn Wi-Fi on</div><div class="ui-row">Set alarm</div><div class="ui-row">Calculate 42 x 17</div><div class="ui-row">Text the update</div>
+            <div id="cursor" class="cursor"></div>
+            <div id="ray" class="ai-ray"></div>
+          </div>
+        </div>
+        <div id="triad" class="huge" style="font-size:70px;position:absolute;bottom:90px"><span class="word">VISION</span> <span class="word cyan">+</span> <span class="word">REASONING</span> <span class="word cyan">+</span> <span class="word">ACTION</span></div>
+      </section>
+
+      <section id="metrics" class="clip scene" data-start="15" data-duration="7" data-track-index="13">
+        <div class="comparison before" style="left:260px;top:235px"><div id="baseNum" class="compare-num">39%</div><div class="label">Zero-shot</div></div>
+        <div class="comparison after" style="right:260px;top:235px"><div id="trainedNum" class="compare-num green">53%</div><div class="label">Trained model</div></div>
+        <div id="gain" class="metric" style="left:0;right:0;top:555px"><div class="num">+35%</div><div class="label">relative improvement</div></div>
+        <div id="tasks" class="huge" style="font-size:88px;position:absolute;bottom:120px"><span class="green">116</span> ANDROID TASKS</div>
+      </section>
+
+      <section id="montage" class="clip scene" data-start="22" data-duration="5" data-track-index="14">
+        <div class="task-rush">
+          <div class="mini-phone m1" style="left:190px;top:210px"><div class="screen"><div class="status"><span>8:02</span><span>OK</span></div><div class="app-title">Calculator</div><div class="ui-grid"><div class="ui-tile">7</div><div class="ui-tile">8</div><div class="ui-tile">9</div><div class="ui-tile">4</div><div class="ui-tile">5</div><div class="ui-tile">6</div><div class="ui-tile green">=</div></div><div class="success">SUCCESS</div></div></div>
+          <div class="mini-phone m2" style="left:610px;top:210px"><div class="screen"><div class="status"><span>8:03</span><span>OK</span></div><div class="app-title">Settings</div><div class="ui-row">Wi-Fi</div><div class="ui-row green">Enabled</div><div class="ui-row">Bluetooth</div><div class="success">SUCCESS</div></div></div>
+          <div class="mini-phone m3" style="right:610px;top:210px"><div class="screen"><div class="status"><span>8:04</span><span>OK</span></div><div class="app-title">Clock</div><div class="ui-row">Alarm</div><div class="ui-row green">7:30 AM</div><div class="ui-row">Save</div><div class="success">SUCCESS</div></div></div>
+          <div class="mini-phone m4" style="right:190px;top:210px"><div class="screen"><div class="status"><span>8:05</span><span>OK</span></div><div class="app-title">SMS</div><div class="ui-row">Compose</div><div class="ui-row green">Sent</div><div class="ui-row">Delivered</div><div class="success">SUCCESS</div></div></div>
+        </div>
+      </section>
+
+      <section id="ending" class="clip scene" data-start="27" data-duration="3" data-track-index="15">
+        <div id="future" class="title">THE FUTURE<br /><span class="cyan">OF MOBILE</span></div>
+        <div class="ending-mark">CSULA AI RESEARCH · SPRING 2026</div>
+      </section>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      if (window.gsap) {
+        gsap.defaults({ ease: "power3.out" });
+        const tl = gsap.timeline({ paused: true });
+        window.__timelines.main = tl;
+
+        const countTo = (selector, value, suffix, start) => {
+          const state = { n: 0 };
+          tl.to(state, {
+            n: value,
+            duration: 1.25,
+            ease: "power4.out",
+            onUpdate: () => { document.querySelector(selector).textContent = Math.round(state.n) + suffix; }
+          }, start);
+        };
+
+        tl.fromTo("#wakePhone", { opacity: 0, scale: 0.36, filter: "brightness(0)" }, { opacity: 1, scale: 0.82, filter: "brightness(1.45)", duration: 0.7 }, 0.15)
+          .to("#wakePhone", { boxShadow: "0 0 120px rgba(0,212,255,.95)", duration: 0.38, yoyo: true, repeat: 1 }, 0.75)
+          .to("#wakePhone", { scale: 1.8, opacity: 0, filter: "blur(10px)", duration: 0.55 }, 1.48)
+          .fromTo("#mainTitle", { opacity: 0, scale: 3.2, rotateX: 35, filter: "blur(18px)" }, { opacity: 1, scale: 1, rotateX: 0, filter: "blur(0)", duration: 0.36, ease: "expo.out" }, 1.72)
+          .fromTo("#streakA", { x: 0, opacity: 0 }, { x: 2900, opacity: 1, duration: 0.7, ease: "power4.in" }, 1.72)
+          .to("#mainTitle", { scale: 5.2, opacity: 0, filter: "blur(18px)", duration: 0.55, ease: "power4.in" }, 2.45);
+
+        tl.fromTo("#problemText .word", { opacity: 0, y: 100, skewX: -14, filter: "blur(10px)" }, { opacity: 1, y: 0, skewX: 0, filter: "blur(0)", duration: 0.42, stagger: 0.11 }, 3.05)
+          .fromTo(".problem-phone", { opacity: 0, y: 180, filter: "blur(8px)" }, { opacity: 1, y: 0, filter: "blur(0)", duration: 0.6, stagger: 0.14 }, 3.35)
+          .to("#problemText .word", { x: () => gsap.utils.random(-80, 80), y: () => gsap.utils.random(-46, 46), rotate: () => gsap.utils.random(-8, 8), duration: 0.16, yoyo: true, repeat: 7, ease: "steps(1)" }, 4.35)
+          .to(".problem-phone", { x: () => gsap.utils.random(-36, 36), duration: 0.1, yoyo: true, repeat: 9, ease: "steps(1)" }, 5.2)
+          .to("#flash", { opacity: 1, duration: 0.12, yoyo: true, repeat: 1 }, 7.86);
+
+        tl.fromTo("#agentTitle", { opacity: 0, scale: 0.72, y: -64, filter: "blur(14px)" }, { opacity: 1, scale: 1, y: 0, filter: "blur(0)", duration: 0.55, ease: "expo.out" }, 8.05)
+          .fromTo("#agentPhone", { opacity: 0, y: 180, rotateY: -30, scale: 0.76 }, { opacity: 1, y: 0, rotateY: 0, scale: 1, duration: 0.8 }, 8.4)
+          .fromTo("#cursor", { opacity: 0, left: 250, top: 150, scale: 0.3 }, { opacity: 1, left: 62, top: 158, scale: 1, duration: 0.45 }, 9.32)
+          .to("#ray", { opacity: 1, left: 88, top: 175, rotate: 18, duration: 0.25 }, 9.55)
+          .to("#cursor", { left: 248, top: 265, duration: 0.52, ease: "power2.inOut" }, 10.05)
+          .to("#cursor", { scale: 1.8, duration: 0.12, yoyo: true, repeat: 1 }, 10.55)
+          .to("#agentPhone .target", { color: "#49ff91", boxShadow: "0 0 34px rgba(73,255,145,.45)", borderColor: "rgba(73,255,145,.8)", duration: 0.35 }, 10.58)
+          .fromTo("#triad .word", { opacity: 0, y: 72, scale: 0.6 }, { opacity: 1, y: 0, scale: 1, duration: 0.34, stagger: 0.22, ease: "back.out(2.6)" }, 11.0)
+          .to("#solution", { scale: 1.18, opacity: 0, filter: "blur(14px)", duration: 0.55, ease: "power4.in" }, 14.45);
+
+        countTo("#baseNum", 39, "%", 15.15);
+        countTo("#trainedNum", 53, "%", 15.45);
+        tl.fromTo(".comparison", { opacity: 0, y: 100, scale: 0.86 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, stagger: 0.18 }, 15.0)
+          .fromTo("#gain", { opacity: 0, scale: 0.2, filter: "blur(18px)" }, { opacity: 1, scale: 1, filter: "blur(0)", duration: 0.45, ease: "back.out(2.8)" }, 16.8)
+          .fromTo("#tasks", { opacity: 0, y: 80 }, { opacity: 1, y: 0, duration: 0.45 }, 18.2)
+          .to("#gain", { scale: 1.08, duration: 0.22, yoyo: true, repeat: 5 }, 18.65)
+          .to("#metrics", { y: -90, opacity: 0, filter: "blur(10px)", duration: 0.5 }, 21.45);
+
+        tl.fromTo(".mini-phone", { opacity: 0, y: 160, scale: 0.58, rotate: -8 }, { opacity: 1, y: 0, scale: 1, rotate: 0, duration: 0.32, stagger: 0.48, ease: "power4.out" }, 22.05)
+          .to(".mini-phone .success", { opacity: 1, duration: 0.16, stagger: 0.48 }, 22.45)
+          .to(".mini-phone", { x: () => gsap.utils.random(-40, 40), scale: 1.05, duration: 0.12, yoyo: true, repeat: 11, ease: "steps(1)" }, 23.2)
+          .to("#montage", { scale: 1.45, opacity: 0, filter: "blur(16px)", duration: 0.5 }, 26.45);
+
+        tl.fromTo("#future", { opacity: 0, scale: 0.4, filter: "blur(22px)" }, { opacity: 1, scale: 1, filter: "blur(0)", duration: 0.62, ease: "expo.out" }, 27.0)
+          .fromTo(".ending-mark", { opacity: 0, y: 34 }, { opacity: 1, y: 0, duration: 0.5 }, 27.45)
+          .fromTo("#streakB", { x: 0, opacity: 0 }, { x: -3000, opacity: 1, duration: 0.85, ease: "power4.in" }, 27.72)
+          .to("#future", { scale: 1.12, textShadow: "0 0 90px rgba(0,212,255,1)", duration: 1.0 }, 28.0)
+          .to("#ending", { opacity: 0, filter: "blur(12px)", duration: 0.75 }, 29.2);
+      }
+    </script>
+  </body>
+</html>
