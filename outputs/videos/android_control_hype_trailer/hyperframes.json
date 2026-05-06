@@ -1,6 +1,8 @@
 {
   "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
   "registry": "https://raw.githubusercontent.com/heygen-com/hyperframes/main/registry",
+  "duration": 30,
+  "fps": 30,
   "paths": {
     "blocks": "compositions",
     "components": "compositions/components",

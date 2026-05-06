@@ -1,656 +1,497 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=1920, height=1080" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" />
-    <script src="assets/gsap.min.js"></script>
-    <style>
-      * { box-sizing: border-box; }
-      html, body {
-        width: 1920px;
-        height: 1080px;
-        margin: 0;
-        overflow: hidden;
-        background: #fafafa;
-        color: #1f2937;
-        font-family: "Google Sans", Roboto, Arial, sans-serif;
-      }
-      #root {
-        position: relative;
-        width: 1920px;
-        height: 1080px;
-        overflow: hidden;
-        background:
-          radial-gradient(circle at 14% 14%, rgba(61, 220, 132, 0.18), transparent 28%),
-          radial-gradient(circle at 84% 20%, rgba(66, 133, 244, 0.14), transparent 24%),
-          radial-gradient(circle at 78% 86%, rgba(7, 193, 96, 0.15), transparent 26%),
-          linear-gradient(180deg, #ffffff 0%, #fafafa 55%, #f1f5f9 100%);
-      }
-      #root::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background-image:
-          linear-gradient(rgba(52, 168, 83, 0.08) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(66, 133, 244, 0.08) 1px, transparent 1px);
-        background-size: 72px 72px;
-        mask-image: radial-gradient(circle at 50% 48%, black 0 50%, transparent 82%);
-        animation: materialGrid 8s linear infinite;
-      }
-      .clip { position: absolute; }
-      .scene {
-        inset: 0;
-        overflow: visible;
-        display: grid;
-        place-items: center;
-        perspective: 1500px;
-        transform-style: preserve-3d;
-      }
-      .soft-vignette {
-        inset: 0;
-        z-index: 95;
-        pointer-events: none;
-        background:
-          radial-gradient(circle at center, transparent 52%, rgba(52, 168, 83, 0.08) 100%),
-          linear-gradient(180deg, rgba(255,255,255,0.3), transparent 14%, transparent 84%, rgba(255,255,255,0.35));
-      }
-      .wave-field {
-        inset: 0;
-        z-index: 1;
-        pointer-events: none;
-        opacity: 0.8;
-      }
-      .wave {
-        fill: none;
-        stroke: rgba(61, 220, 132, 0.24);
-        stroke-width: 4;
-        stroke-linecap: round;
-        stroke-dasharray: 18 24;
-        animation: waveDash 4.8s linear infinite;
-      }
-      .wave.blue { stroke: rgba(66, 133, 244, 0.18); animation-duration: 6.4s; }
-      .particles {
-        inset: 0;
-        z-index: 60;
-        pointer-events: none;
-      }
-      .particle {
-        position: absolute;
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #3ddc84;
-        box-shadow: 0 0 20px rgba(61, 220, 132, 0.6);
-        opacity: 0.62;
-        animation: particlePath 5.6s cubic-bezier(.45,0,.2,1) infinite alternate;
-      }
-      .particle:nth-child(3n) { background: #4285f4; box-shadow: 0 0 20px rgba(66, 133, 244, 0.5); }
-      .particle:nth-child(4n) { background: #07c160; }
-      .blob {
-        position: absolute;
-        border-radius: 44% 56% 62% 38% / 48% 42% 58% 52%;
-        background: linear-gradient(135deg, #3ddc84, #34a853 48%, #4285f4);
-        filter: drop-shadow(0 32px 68px rgba(52, 168, 83, 0.22));
-        animation: blobMorph 5.5s ease-in-out infinite alternate, gradientShift 6s ease-in-out infinite;
-        background-size: 240% 240%;
-      }
-      .blob.light {
-        background: linear-gradient(135deg, rgba(61,220,132,.2), rgba(66,133,244,.14), rgba(255,255,255,.45));
-        filter: blur(0) drop-shadow(0 30px 70px rgba(66, 133, 244, 0.13));
-      }
-      .headline {
-        font-size: 132px;
-        line-height: 0.92;
-        font-weight: 900;
-        text-align: center;
-        text-transform: uppercase;
-        color: #202124;
-      }
-      .headline .green, .green { color: #34a853; }
-      .headline .blue, .blue { color: #4285f4; }
-      .subline {
-        font-size: 44px;
-        line-height: 1.18;
-        font-weight: 700;
-        color: #475569;
-        text-align: center;
-      }
-      .letter, .word {
-        display: inline-block;
-        transform-origin: 50% 70%;
-      }
-      .android-mark {
-        position: absolute;
-        width: 220px;
-        height: 220px;
-        transform-style: preserve-3d;
-      }
-      .android-body {
-        position: absolute;
-        left: 38px;
-        top: 70px;
-        width: 144px;
-        height: 116px;
-        border-radius: 34px 34px 24px 24px;
-        background: #3ddc84;
-        box-shadow: 0 22px 58px rgba(61, 220, 132, 0.35);
-      }
-      .android-head {
-        position: absolute;
-        left: 38px;
-        top: 22px;
-        width: 144px;
-        height: 86px;
-        border-radius: 86px 86px 22px 22px;
-        background: #3ddc84;
-      }
-      .android-head::before,
-      .android-head::after {
-        content: "";
-        position: absolute;
-        top: 32px;
-        width: 13px;
-        height: 13px;
-        border-radius: 50%;
-        background: #ffffff;
-      }
-      .android-head::before { left: 42px; }
-      .android-head::after { right: 42px; }
-      .antenna {
-        position: absolute;
-        top: 4px;
-        width: 8px;
-        height: 46px;
-        border-radius: 8px;
-        background: #3ddc84;
-        transform-origin: bottom center;
-      }
-      .antenna.a { left: 70px; transform: rotate(-28deg); }
-      .antenna.b { right: 70px; transform: rotate(28deg); }
-      .phone {
-        position: absolute;
-        width: 360px;
-        height: 744px;
-        border: 11px solid #1f2937;
-        border-radius: 48px;
-        background: #111827;
-        box-shadow:
-          0 0 0 2px rgba(61, 220, 132, 0.34),
-          0 34px 76px rgba(15, 23, 42, 0.18);
-        overflow: hidden;
-        transform-style: preserve-3d;
-      }
-      .phone::before {
-        content: "";
-        position: absolute;
-        z-index: 10;
-        left: 50%;
-        top: 17px;
-        width: 98px;
-        height: 18px;
-        border-radius: 18px;
-        transform: translateX(-50%);
-        background: #111827;
-      }
-      .screen {
-        position: absolute;
-        inset: 0;
-        padding: 58px 24px 28px;
-        background:
-          radial-gradient(circle at 26% 14%, rgba(61, 220, 132, 0.18), transparent 30%),
-          linear-gradient(180deg, #ffffff, #f8fafc);
-      }
-      .status {
-        display: flex;
-        justify-content: space-between;
-        height: 34px;
-        color: #64748b;
-        font-size: 15px;
-        font-weight: 700;
-      }
-      .app-title {
-        margin: 19px 0 18px;
-        font-size: 32px;
-        line-height: 1;
-        font-weight: 900;
-        color: #202124;
-      }
-      .ui-row, .ui-tile, .message {
-        border-radius: 8px;
-        background: #ffffff;
-        border: 1px solid rgba(148, 163, 184, 0.36);
-        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
-      }
-      .ui-row {
-        position: relative;
-        height: 72px;
-        margin: 14px 0;
-        padding: 17px 18px;
-        color: #334155;
-        font-size: 22px;
-        font-weight: 700;
-        overflow: hidden;
-      }
-      .ui-row.active {
-        border-color: rgba(61, 220, 132, 0.95);
-        background: linear-gradient(90deg, rgba(61, 220, 132, 0.2), #ffffff);
-      }
-      .ui-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-      }
-      .ui-tile {
-        height: 84px;
-        display: grid;
-        place-items: center;
-        font-size: 28px;
-        font-weight: 900;
-        color: #334155;
-      }
-      .success {
-        position: absolute;
-        z-index: 14;
-        left: 50%;
-        bottom: 38px;
-        transform: translateX(-50%);
-        padding: 12px 18px;
-        border-radius: 8px;
-        background: #34a853;
-        color: #ffffff;
-        box-shadow: 0 14px 36px rgba(52, 168, 83, 0.32);
-        font-size: 20px;
-        font-weight: 900;
-        opacity: 0;
-      }
-      .cursor {
-        position: absolute;
-        z-index: 16;
-        width: 36px;
-        height: 36px;
-        border: 4px solid #4285f4;
-        border-radius: 50%;
-        background: rgba(66, 133, 244, 0.1);
-        box-shadow: 0 0 0 10px rgba(66, 133, 244, 0.08), 0 12px 30px rgba(66, 133, 244, 0.35);
-        opacity: 0;
-      }
-      .connections {
-        position: absolute;
-        inset: 0;
-        z-index: 6;
-        pointer-events: none;
-      }
-      .conn {
-        fill: none;
-        stroke: url(#connGradient);
-        stroke-width: 5;
-        stroke-linecap: round;
-        stroke-dasharray: 18 18;
-        opacity: 0;
-      }
-      .pill-row {
-        position: absolute;
-        display: flex;
-        gap: 24px;
-      }
-      .pill {
-        padding: 20px 28px;
-        min-width: 230px;
-        border-radius: 8px;
-        background: #ffffff;
-        border: 1px solid rgba(61, 220, 132, 0.38);
-        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
-        color: #202124;
-        font-size: 30px;
-        font-weight: 900;
-        text-align: center;
-      }
-      .metric-main {
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: 118px;
-        text-align: center;
-      }
-      .metric-number {
-        font-size: 232px;
-        line-height: 0.86;
-        font-weight: 900;
-        color: #34a853;
-        text-shadow: 0 20px 60px rgba(52, 168, 83, 0.18);
-      }
-      .metric-label {
-        margin-top: 22px;
-        font-size: 42px;
-        line-height: 1.1;
-        font-weight: 900;
-        color: #334155;
-        text-transform: uppercase;
-      }
-      .metric-card {
-        position: absolute;
-        width: 372px;
-        height: 188px;
-        padding: 30px;
-        border-radius: 8px;
-        background: #ffffff;
-        border: 1px solid rgba(148, 163, 184, 0.26);
-        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.1);
-        text-align: center;
-      }
-      .metric-card .value {
-        font-size: 72px;
-        line-height: 1;
-        font-weight: 900;
-      }
-      .metric-card .caption {
-        margin-top: 14px;
-        font-size: 22px;
-        font-weight: 900;
-        color: #64748b;
-        text-transform: uppercase;
-      }
-      .check-list {
-        position: absolute;
-        left: 682px;
-        bottom: 104px;
-        display: flex;
-        gap: 22px;
-      }
-      .check {
-        width: 82px;
-        height: 82px;
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-        background: #3ddc84;
-        box-shadow: 0 14px 34px rgba(61, 220, 132, 0.28);
-        color: #ffffff;
-        font-size: 44px;
-        font-weight: 900;
-      }
-      .mini-phone {
-        position: absolute;
-        width: 306px;
-        height: 626px;
-        border: 9px solid #1f2937;
-        border-radius: 42px;
-        background: #111827;
-        box-shadow: 0 26px 64px rgba(15, 23, 42, 0.16);
-        overflow: hidden;
-        opacity: 0;
-      }
-      .mini-phone .screen { padding: 50px 20px 22px; }
-      .mini-phone .app-title { font-size: 27px; }
-      .mini-phone .ui-row { height: 63px; font-size: 19px; }
-      .badge {
-        position: absolute;
-        right: 18px;
-        top: 82px;
-        z-index: 16;
-        padding: 10px 13px;
-        border-radius: 8px;
-        background: #34a853;
-        color: #ffffff;
-        font-weight: 900;
-        font-size: 16px;
-        box-shadow: 0 12px 26px rgba(52, 168, 83, 0.28);
-        opacity: 0;
-      }
-      .ending-mark {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 74px;
-        text-align: center;
-        color: #64748b;
-        font-size: 28px;
-        font-weight: 900;
-        text-transform: uppercase;
-      }
-      .white-flash {
-        inset: 0;
-        z-index: 94;
-        background: #ffffff;
-        opacity: 0;
-        pointer-events: none;
-      }
-      @keyframes materialGrid {
-        from { background-position: 0 0, 0 0; }
-        to { background-position: 144px 72px, 72px 144px; }
-      }
-      @keyframes waveDash {
-        to { stroke-dashoffset: -168; }
-      }
-      @keyframes blobMorph {
-        0% { border-radius: 44% 56% 62% 38% / 48% 42% 58% 52%; transform: rotate(0deg); }
-        50% { border-radius: 62% 38% 42% 58% / 36% 62% 38% 64%; }
-        100% { border-radius: 36% 64% 56% 44% / 58% 44% 56% 42%; transform: rotate(8deg); }
-      }
-      @keyframes gradientShift {
-        0%, 100% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-      }
-      @keyframes particlePath {
-        0% { transform: translate3d(0, 0, 0) scale(0.65); opacity: 0.2; }
-        45% { transform: translate3d(58px, -84px, 0) scale(1.15); opacity: 0.72; }
-        100% { transform: translate3d(-32px, -154px, 0) scale(0.95); opacity: 0.5; }
-      }
-    </style>
-  </head>
-  <body>
-    <div id="root" data-composition-id="main" data-start="0" data-duration="30" data-width="1920" data-height="1080">
-      <svg id="waveField" class="clip wave-field" data-layout-allow-overflow data-start="0" data-duration="30" data-track-index="2" viewBox="0 0 1920 1080">
-        <path class="wave" d="M-80 770 C220 640 360 900 620 754 S1040 600 1270 746 S1640 910 2020 680" />
-        <path class="wave blue" d="M-120 305 C190 162 386 430 650 292 S1090 158 1328 318 S1670 472 2040 250" />
-      </svg>
-      <div id="softVignette" class="clip soft-vignette" data-start="0" data-duration="30" data-track-index="95"></div>
-      <div id="whiteFlash" class="clip white-flash" data-start="0" data-duration="30" data-track-index="94"></div>
-      <div id="particleField" class="clip particles" data-start="0" data-duration="30" data-track-index="60">
-        <div class="particle" style="left:172px;top:780px;animation-delay:.1s"></div>
-        <div class="particle" style="left:344px;top:242px;animation-delay:1.1s"></div>
-        <div class="particle" style="left:570px;top:910px;animation-delay:2.1s"></div>
-        <div class="particle" style="left:792px;top:168px;animation-delay:.6s"></div>
-        <div class="particle" style="left:1048px;top:834px;animation-delay:1.8s"></div>
-        <div class="particle" style="left:1260px;top:260px;animation-delay:.3s"></div>
-        <div class="particle" style="left:1510px;top:734px;animation-delay:1.5s"></div>
-        <div class="particle" style="left:1732px;top:342px;animation-delay:2.5s"></div>
-      </div>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Android Control - Hype Trailer</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
 
-      <section id="hook" class="clip scene" data-layout-allow-overflow data-start="0" data-duration="3" data-track-index="10">
-        <div id="hookBlob" class="blob" style="left:746px;top:214px;width:426px;height:426px"></div>
-        <div id="hookBot" class="android-mark" style="left:850px;top:286px">
-          <div class="antenna a"></div><div class="antenna b"></div><div class="android-head"></div><div class="android-body"></div>
-        </div>
-        <div id="hookTitle" class="headline split-letters" style="position:absolute;left:0;right:0;top:444px;opacity:0">ANDROID<br /><span class="green">CONTROL</span></div>
-      </section>
+  body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: #FAFAFA;
+    font-family: 'Inter', sans-serif;
+  }
 
-      <section id="problem" class="clip scene" data-start="3" data-duration="5" data-track-index="11">
-        <div class="blob light problem-blob" style="left:210px;top:130px;width:520px;height:520px"></div>
-        <div class="blob light problem-blob" style="right:180px;bottom:82px;width:480px;height:480px"></div>
-        <div id="problemText" class="headline" style="position:absolute;left:0;right:0;top:308px;font-size:112px">
-          <span id="billions" class="split-letters">BILLIONS OF PHONES</span><br />
-          <span id="locked" style="display:inline-block;color:#64748b;filter:blur(8px);opacity:0">LOCKED BEHIND UI</span>
-        </div>
-        <div class="phone problem-phone" style="left:118px;top:186px;transform:rotateY(24deg) rotateZ(-7deg) scale(.72)">
-          <div class="screen"><div class="status"><span>12:08</span><span>5G</span></div><div class="app-title">Settings</div><div class="ui-row">Network</div><div class="ui-row">Permissions</div><div class="ui-row active">Notifications</div></div>
-        </div>
-        <div class="phone problem-phone" style="right:126px;top:210px;transform:rotateY(-24deg) rotateZ(8deg) scale(.68)">
-          <div class="screen"><div class="status"><span>7:16</span><span>LTE</span></div><div class="app-title">Messages</div><div class="ui-row">Open thread</div><div class="ui-row">Send reply</div><div class="ui-row">No API</div></div>
-        </div>
-      </section>
+  .bg-gradient {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #FAFAFA 0%, #F5F5F5 50%, #E8F5E9 100%);
+  }
 
-      <section id="solution" class="clip scene" data-start="8" data-duration="7" data-track-index="12">
-        <svg class="connections" viewBox="0 0 1920 1080">
-          <defs><linearGradient id="connGradient" x1="0" x2="1"><stop stop-color="#3ddc84" /><stop offset="1" stop-color="#4285f4" /></linearGradient></defs>
-          <path class="conn c1" d="M380 290 C590 220 686 426 846 392" />
-          <path class="conn c2" d="M1490 300 C1260 210 1240 414 1082 394" />
-          <path class="conn c3" d="M438 818 C620 690 740 744 850 668" />
-          <path class="conn c4" d="M1480 800 C1282 682 1226 748 1072 666" />
+  .grid-pattern {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-image: 
+      linear-gradient(rgba(61, 220, 132, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(61, 220, 132, 0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  .particle {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #3DDC84;
+    border-radius: 50%;
+    opacity: 0;
+  }
+
+  .phone {
+    position: absolute;
+    width: 280px;
+    height: 560px;
+    background: #1a1a1a;
+    border-radius: 36px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+    overflow: hidden;
+  }
+
+  .phone-screen {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    background: #fff;
+    border-radius: 24px;
+    overflow: hidden;
+  }
+
+  .phone-notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 28px;
+    background: #1a1a1a;
+    border-radius: 0 0 16px 16px;
+    z-index: 10;
+  }
+
+  .cursor {
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    z-index: 100;
+    filter: drop-shadow(0 2px 8px rgba(61, 220, 132, 0.5));
+  }
+
+  .cursor::before {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+    border-left: 12px solid #3DDC84;
+    border-right: 12px solid transparent;
+    border-top: 12px solid transparent;
+    border-bottom: 12px solid transparent;
+    transform: rotate(-30deg);
+  }
+
+  .cursor-ring {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    border: 3px solid #3DDC84;
+    border-radius: 50%;
+    opacity: 0;
+    transform: translate(-50%, -50%);
+  }
+
+  .a11y-tree {
+    position: absolute;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    padding: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+    border: 2px solid #3DDC84;
+  }
+
+  .a11y-node {
+    padding: 2px 0;
+    opacity: 0;
+  }
+
+  .a11y-highlight {
+    background: rgba(61, 220, 132, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #07C160;
+    font-weight: 700;
+  }
+
+  .letter {
+    display: inline-block;
+    opacity: 0;
+  }
+
+  .metric-number {
+    font-size: 120px;
+    font-weight: 900;
+    color: #07C160;
+    line-height: 1;
+  }
+
+  .metric-label {
+    font-size: 24px;
+    font-weight: 600;
+    color: #666;
+    margin-top: 8px;
+  }
+
+  .success-badge {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    background: #3DDC84;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+    font-weight: 700;
+    opacity: 0;
+  }
+
+  .blob {
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    background: linear-gradient(135deg, #3DDC84, #4285F4);
+    border-radius: 50%;
+    opacity: 0.1;
+    filter: blur(60px);
+  }
+</style>
+</head>
+<body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" style="position: absolute; width: 100%; height: 100%;">
+    <div class="bg-gradient"></div>
+    <div class="grid-pattern"></div>
+
+    <div class="blob" id="blob1" style="top: -100px; right: -100px;"></div>
+    <div class="blob" id="blob2" style="bottom: -100px; left: -100px;"></div>
+
+    <div id="particles"></div>
+
+    <!-- Scene 1: Hook (0-3s) -->
+    <div id="hook" style="position: absolute; width: 100%; height: 100%;">
+      <div id="androidIcon" style="position: absolute; top: 50%; left: 50%; width: 120px; height: 160px; opacity: 0;">
+        <svg viewBox="0 0 120 160" fill="none" width="120" height="160">
+          <path d="M60 20 C40 20 25 40 25 65 L25 100 L35 100 L35 130 C35 140 45 145 50 145 L70 145 C75 145 85 140 85 130 L85 100 L95 100 L95 65 C95 40 80 20 60 20 Z" fill="#3DDC84"/>
+          <circle cx="45" cy="55" r="8" fill="white"/>
+          <circle cx="75" cy="55" r="8" fill="white"/>
+          <rect x="30" y="80" width="60" height="10" rx="5" fill="rgba(255,255,255,0.3)"/>
         </svg>
-        <div id="solutionBlob" class="blob" style="left:262px;top:172px;width:710px;height:710px;opacity:.92"></div>
-        <div id="agentTitle" class="headline" style="position:absolute;left:0;right:0;top:70px;font-size:124px;opacity:0"><span class="green">AI</span> AGENTS</div>
-        <div id="agentPhone" class="phone" style="left:780px;top:220px">
-          <div class="screen">
-            <div class="status"><span>10:24</span><span>LLM</span></div>
-            <div class="app-title">Autonomous UI</div>
-            <div class="ui-row target">Turn Wi-Fi on</div>
-            <div class="ui-row">Set alarm</div>
-            <div class="ui-row">Calculate 42 x 17</div>
-            <div class="ui-row">Text the update</div>
-            <div id="cursor" class="cursor"></div>
-            <div class="success">DONE</div>
-          </div>
-        </div>
-        <div id="triad" class="pill-row" style="left:452px;bottom:84px">
-          <div class="pill">VISION</div><div class="pill">REASONING</div><div class="pill">ACTION</div>
-        </div>
-      </section>
-
-      <section id="metrics" class="clip scene" data-start="15" data-duration="7" data-track-index="13">
-        <div class="blob light" style="left:636px;top:82px;width:650px;height:650px"></div>
-        <div class="metric-main">
-          <div id="trainedCounter" class="metric-number">0%</div>
-          <div class="metric-label">Trained Android Control Accuracy</div>
-        </div>
-        <div class="metric-card baseline" style="left:244px;top:432px">
-          <div id="baselineCounter" class="value blue">0%</div>
-          <div class="caption">Zero-shot baseline</div>
-        </div>
-        <div class="metric-card gain" style="right:244px;top:432px">
-          <div id="gainCounter" class="value green">+0%</div>
-          <div class="caption">Relative improvement</div>
-        </div>
-        <div id="tasksText" class="headline" style="position:absolute;left:0;right:0;bottom:212px;font-size:82px;opacity:0"><span class="green">116</span> ANDROID TASKS</div>
-        <div class="check-list"><div class="check">✓</div><div class="check">✓</div><div class="check">✓</div><div class="check">✓</div><div class="check">✓</div></div>
-      </section>
-
-      <section id="montage" class="clip scene" data-start="22" data-duration="5" data-track-index="14">
-        <div class="mini-phone m1" style="left:178px;top:214px">
-          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:02</span><span>OK</span></div><div class="app-title">Calculator</div><div class="ui-grid"><div class="ui-tile">7</div><div class="ui-tile">8</div><div class="ui-tile">9</div><div class="ui-tile">4</div><div class="ui-tile">5</div><div class="ui-tile">6</div><div class="ui-tile green">=</div></div></div>
-        </div>
-        <div class="mini-phone m2" style="left:608px;top:214px">
-          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:03</span><span>OK</span></div><div class="app-title">Settings</div><div class="ui-row">Wi-Fi</div><div class="ui-row active">Enabled</div><div class="ui-row">Bluetooth</div></div>
-        </div>
-        <div class="mini-phone m3" style="right:608px;top:214px">
-          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:04</span><span>OK</span></div><div class="app-title">Clock</div><div class="ui-row">Alarm</div><div class="ui-row active">7:30 AM</div><div class="ui-row">Save</div></div>
-        </div>
-        <div class="mini-phone m4" style="right:178px;top:214px">
-          <div class="badge">SUCCESS</div><div class="screen"><div class="status"><span>8:05</span><span>OK</span></div><div class="app-title">SMS</div><div class="ui-row">Compose</div><div class="ui-row active">Sent</div><div class="ui-row">Delivered</div></div>
-        </div>
-      </section>
-
-      <section id="ending" class="clip scene" data-start="27" data-duration="3" data-track-index="15">
-        <div id="endBlob" class="blob" style="left:760px;top:160px;width:400px;height:400px"></div>
-        <div id="endBot" class="android-mark" style="left:850px;top:250px">
-          <div class="antenna a"></div><div class="antenna b"></div><div class="android-head"></div><div class="android-body"></div>
-        </div>
-        <div id="future" class="headline split-letters" style="position:absolute;left:0;right:0;top:514px;opacity:0">THE FUTURE<br /><span class="green">OF MOBILE</span></div>
-        <div class="ending-mark">CSULA AI RESEARCH · SPRING 2026</div>
-      </section>
+      </div>
+      <div id="hookTitle" style="position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); text-align: center; opacity: 0;">
+        <div style="font-size: 80px; font-weight: 900; color: #1a1a1a; letter-spacing: -2px;" id="hookLetters"></div>
+        <div style="font-size: 28px; font-weight: 600; color: #3DDC84; margin-top: 16px;" id="hookSubtitle"></div>
+      </div>
     </div>
 
-    <script>
-      window.__timelines = window.__timelines || {};
-      if (window.gsap) {
-        gsap.defaults({ ease: "power3.out" });
+    <!-- Scene 2: AI Agent Demo (3-10s) -->
+    <div id="demo" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
+      <div id="demoPhone" class="phone" style="left: 400px; top: 260px;">
+        <div class="phone-screen">
+          <div class="phone-notch"></div>
+          <div style="padding: 40px 16px 16px;">
+            <div style="font-size: 14px; color: #666; margin-bottom: 8px;">Settings</div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                <div style="width: 24px; height: 24px; background: #4285F4; border-radius: 6px;"></div>
+                <div style="font-size: 13px; color: #333;">Wi-Fi</div>
+              </div>
+              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                <div style="width: 24px; height: 24px; background: #3DDC84; border-radius: 6px;"></div>
+                <div style="font-size: 13px; color: #333;">Bluetooth</div>
+              </div>
+              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                <div style="width: 24px; height: 24px; background: #FF6B6B; border-radius: 6px;"></div>
+                <div style="font-size: 13px; color: #333;">Display</div>
+              </div>
+              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                <div style="width: 24px; height: 24px; background: #FFB74D; border-radius: 6px;"></div>
+                <div style="font-size: 13px; color: #333;">Battery</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="demoCursor" class="cursor" style="left: 550px; top: 380px;"></div>
+      <div id="demoCursorRing" class="cursor-ring" style="left: 550px; top: 380px;"></div>
+      
+      <div id="a11yTree" class="a11y-tree" style="right: 200px; top: 200px; width: 400px; opacity: 0;">
+        <div style="font-size: 13px; font-weight: 700; color: #3DDC84; margin-bottom: 8px;">Accessibility Tree</div>
+        <div class="a11y-node" id="node1"><span class="a11y-highlight">[0]</span> <span style="color: #666;">FrameLayout</span></div>
+        <div class="a11y-node" id="node2">&nbsp;&nbsp;<span class="a11y-highlight">[1]</span> <span style="color: #666;">RecyclerView</span></div>
+        <div class="a11y-node" id="node3">&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight">[2]</span> <span style="color: #333;">LinearLayout</span></div>
+        <div class="a11y-node" id="node4">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight">[3]</span> <span style="color: #333;">TextView</span> <span style="color: #999;">"Wi-Fi"</span></div>
+        <div class="a11y-node" id="node5">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight" style="background: rgba(61,220,132,0.3); border: 2px solid #3DDC84;">[4]</span> <span style="color: #07C160; font-weight: 700;">Switch</span> <span style="color: #999;">"enabled"</span></div>
+      </div>
 
-        const splitLetters = (selector) => {
-          document.querySelectorAll(selector).forEach((node) => {
-            const original = node.innerHTML;
-            const parts = original.split(/(<br\s*\/?>)/i);
-            node.innerHTML = parts.map((part) => {
-              if (/^<br/i.test(part)) return part;
-              const tmp = document.createElement("span");
-              tmp.innerHTML = part;
-              const text = tmp.textContent || "";
-              return text.split("").map((char) => {
-                if (char === " ") return '<span class="letter">&nbsp;</span>';
-                return `<span class="letter">${char}</span>`;
-              }).join("");
-            }).join("");
-          });
-        };
-        splitLetters(".split-letters");
+      <div id="demoText" style="position: absolute; left: 400px; top: 880px; text-align: center; width: 100%;">
+        <div style="font-size: 28px; font-weight: 700; color: #333; opacity: 0;" id="demoCaption">
+          AI navigates the accessibility tree → understands UI → takes action
+        </div>
+      </div>
+    </div>
 
-        const tl = gsap.timeline({ paused: true });
-        window.__timelines.main = tl;
+    <!-- Scene 3: Metrics (10-20s) -->
+    <div id="metrics" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+        <div style="font-size: 24px; font-weight: 600; color: #666; margin-bottom: 16px;" id="metricsLabel">Zero-shot → Trained</div>
+        <div style="display: flex; align-items: center; gap: 60px; justify-content: center;">
+          <div>
+            <div class="metric-number" id="metricBefore" style="color: #999;">0%</div>
+            <div class="metric-label">Baseline</div>
+          </div>
+          <div style="font-size: 60px; color: #3DDC84; font-weight: 700;" id="arrowIcon">→</div>
+          <div>
+            <div class="metric-number" id="metricAfter" style="color: #07C160;">0%</div>
+            <div class="metric-label">Trained</div>
+          </div>
+        </div>
+        <div style="margin-top: 40px;">
+          <div style="font-size: 80px; font-weight: 900; color: #3DDC84; opacity: 0;" id="improvement">+35%</div>
+          <div style="font-size: 24px; font-weight: 600; color: #666; margin-top: 8px; opacity: 0;" id="improvementLabel">Improvement</div>
+        </div>
+      </div>
+    </div>
 
-        const countTo = (selector, value, suffix, start, prefix = "") => {
-          const state = { n: 0 };
-          tl.to(state, {
-            n: value,
-            duration: 1.35,
-            ease: "elastic.out(1, 0.55)",
-            onUpdate: () => { document.querySelector(selector).textContent = prefix + Math.round(state.n) + suffix; }
-          }, start);
-        };
+    <!-- Scene 4: Tasks Montage (20-26s) -->
+    <div id="tasks" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+        <div style="font-size: 120px; font-weight: 900; color: #07C160; line-height: 1;" id="tasksNumber">0</div>
+        <div style="font-size: 36px; font-weight: 700; color: #333; margin-top: 16px;" id="tasksLabel">Android Tasks Mastered</div>
+      </div>
+      <div class="success-badge" id="badge1" style="top: 200px; left: 300px;">✓</div>
+      <div class="success-badge" id="badge2" style="top: 300px; right: 400px;">✓</div>
+      <div class="success-badge" id="badge3" style="bottom: 300px; left: 500px;">✓</div>
+      <div class="success-badge" id="badge4" style="bottom: 200px; right: 300px;">✓</div>
+      <div class="success-badge" id="badge5" style="top: 400px; left: 200px;">✓</div>
+      <div class="success-badge" id="badge6" style="top: 500px; right: 200px;">✓</div>
+    </div>
 
-        gsap.set(["#problem", "#solution", "#metrics", "#montage", "#ending"], { opacity: 1 });
-        gsap.set("#triad .pill, .metric-card, .check", { opacity: 0 });
+    <!-- Scene 5: Ending (26-30s) -->
+    <div id="ending" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+        <div style="font-size: 72px; font-weight: 900; color: #1a1a1a; line-height: 1.2; opacity: 0;" id="endingTitle">THE FUTURE OF<br><span style="color: #3DDC84;">MOBILE</span></div>
+        <div style="font-size: 24px; font-weight: 600; color: #666; margin-top: 32px; opacity: 0;" id="endingSubtitle">CSULA AI Research • Spring 2026</div>
+      </div>
+    </div>
+  </div>
 
-        tl.fromTo("#hookBlob", { scale: 0, rotate: -70, filter: "blur(22px)" }, { scale: 1, rotate: 0, filter: "blur(0)", duration: 0.85, ease: "elastic.out(1, 0.5)" }, 0.05)
-          .fromTo("#hookBot", { opacity: 0, y: 120, scale: 0.35, rotateY: -70 }, { opacity: 1, y: 0, scale: 1, rotateY: 0, duration: 0.72, ease: "back.out(1.7)" }, 0.34)
-          .fromTo("#hookTitle", { opacity: 0, y: 170 }, { opacity: 1, y: 0, duration: 0.2 }, 0.92)
-          .fromTo("#hookTitle .letter", { opacity: 0, y: 90, rotateX: 70, scale: 0.6 }, { opacity: 1, y: 0, rotateX: 0, scale: 1, duration: 0.62, stagger: 0.017, ease: "elastic.out(1, 0.5)" }, 0.96)
-          .to("#particleField .particle", { scale: 2.4, opacity: 1, x: () => gsap.utils.random(-120, 120), y: () => gsap.utils.random(-110, 80), duration: 0.46, stagger: 0.035, ease: "back.out(2)" }, 1.05)
-          .to("#hook", { y: -92, scale: 1.18, opacity: 0, filter: "blur(18px)", duration: 0.68, ease: "power4.in" }, 2.36)
-          .set("#hook", { opacity: 0, visibility: "hidden" }, 3.0);
+  <script src="assets/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines["main"] = gsap.timeline({ paused: true });
+    const tl = window.__timelines["main"];
 
-        tl.fromTo(".problem-phone", { opacity: 0, y: 190, rotateX: 35, filter: "blur(10px)" }, { opacity: 1, y: 0, rotateX: 0, filter: "blur(0)", duration: 0.72, stagger: 0.18, ease: "back.out(1.7)" }, 3.05)
-          .fromTo("#billions .letter", { opacity: 0, y: 70, rotateZ: 10 }, { opacity: 1, y: 0, rotateZ: 0, duration: 0.36, stagger: 0.025, ease: "back.out(2.4)" }, 3.28)
-          .to("#locked", { opacity: 1, filter: "blur(0)", y: 0, duration: 0.72, ease: "power3.out" }, 4.55)
-          .to(".problem-blob", { x: (i) => i ? -130 : 120, y: (i) => i ? -60 : 72, scale: 1.15, duration: 2.4, ease: "sine.inOut" }, 4.2)
-          .to(".problem-phone", { rotateY: (i) => i ? -12 : 12, y: -22, duration: 1.7, yoyo: true, repeat: 1, ease: "sine.inOut" }, 4.7)
-          .to("#problem", { rotateY: -16, x: -230, opacity: 0, filter: "blur(14px)", duration: 0.62, ease: "power4.in" }, 7.38)
-          .set("#problem", { opacity: 0, visibility: "hidden" }, 8.0)
-          .to("#whiteFlash", { opacity: 0.8, duration: 0.08, yoyo: true, repeat: 1 }, 7.82);
-
-        tl.fromTo("#solutionBlob", { x: -420, scale: 0.72, rotate: -28, opacity: 0 }, { x: 0, scale: 1, rotate: 0, opacity: 0.92, duration: 0.9, ease: "elastic.out(1, 0.55)" }, 8.02)
-          .fromTo("#agentTitle", { scale: 0.44, rotate: -10, y: -80, filter: "blur(14px)" }, { opacity: 1, scale: 1, rotate: 0, y: 0, filter: "blur(0)", duration: 0.64, ease: "back.out(1.7)" }, 8.22)
-          .fromTo("#agentPhone", { opacity: 0, x: 430, y: 90, rotateY: -42, scale: 0.74 }, { opacity: 1, x: 0, y: 0, rotateY: 0, scale: 1, duration: 0.9, ease: "elastic.out(1, 0.55)" }, 8.66)
-          .to(".conn", { opacity: 1, strokeDashoffset: -180, duration: 1.2, stagger: 0.12, ease: "power2.inOut" }, 9.06)
-          .fromTo("#cursor", { opacity: 0, left: 250, top: 150, scale: 0.2 }, { opacity: 1, left: 62, top: 158, scale: 1, duration: 0.5, ease: "back.out(2)" }, 9.5)
-          .to("#cursor", { left: 248, top: 265, duration: 0.58, ease: "power2.inOut" }, 10.18)
-          .to("#cursor", { scale: 1.78, duration: 0.12, yoyo: true, repeat: 1, ease: "power1.inOut" }, 10.72)
-          .to("#agentPhone .target", { className: "ui-row target active", duration: 0.24 }, 10.76)
-          .to("#agentPhone .success", { opacity: 1, y: -8, duration: 0.34, ease: "back.out(2.4)" }, 10.95)
-          .fromTo("#triad .pill", { y: 84, rotateX: 55, scale: 0.56 }, { opacity: 1, y: 0, rotateX: 0, scale: 1, duration: 0.54, stagger: 0.2, ease: "elastic.out(1, 0.5)" }, 11.22)
-          .to("#solution", { scale: 1.13, rotateY: 18, x: 220, opacity: 0, filter: "blur(16px)", duration: 0.68, ease: "power4.in" }, 14.22)
-          .set("#solution", { opacity: 0, visibility: "hidden" }, 15.0);
-
-        countTo("#trainedCounter", 53, "%", 15.15);
-        countTo("#baselineCounter", 39, "%", 15.28);
-        countTo("#gainCounter", 35, "%", 16.35, "+");
-        tl.fromTo(".metric-main", { opacity: 0, scale: 0.5, y: 90, filter: "blur(22px)" }, { opacity: 1, scale: 1, y: 0, filter: "blur(0)", duration: 0.76, ease: "elastic.out(1, 0.55)" }, 15.0)
-          .fromTo(".metric-card", { y: 120, rotateX: 60, scale: 0.72 }, { opacity: 1, y: 0, rotateX: 0, scale: 1, duration: 0.58, stagger: 0.18, ease: "back.out(1.7)" }, 15.44)
-          .fromTo("#tasksText", { y: 78, scale: 0.86, filter: "blur(12px)" }, { opacity: 1, y: 0, scale: 1, filter: "blur(0)", duration: 0.52, ease: "back.out(1.7)" }, 17.64)
-          .fromTo(".check", { scale: 0, rotate: -80 }, { opacity: 1, scale: 1, rotate: 0, duration: 0.46, stagger: 0.12, ease: "bounce.out" }, 18.12)
-          .to(".metric-number", { scale: 1.08, duration: 0.18, yoyo: true, repeat: 5, ease: "sine.inOut" }, 18.7)
-          .to("#metrics", { y: -160, opacity: 0, filter: "blur(14px)", duration: 0.64, ease: "power4.in" }, 21.24)
-          .set("#metrics", { opacity: 0, visibility: "hidden" }, 22.0);
-
-        tl.fromTo(".mini-phone", { opacity: 0, y: 210, rotateY: -34, rotateZ: -8, scale: 0.58 }, { opacity: 1, y: 0, rotateY: 0, rotateZ: 0, scale: 1, duration: 0.44, stagger: 0.28, ease: "back.out(1.9)" }, 22.02)
-          .to(".mini-phone .badge", { opacity: 1, y: 8, duration: 0.18, stagger: 0.28, ease: "back.out(2)" }, 22.34)
-          .to(".mini-phone", { x: (i) => [-48, 34, -28, 46][i], y: (i) => [18, -26, 22, -18][i], rotateZ: (i) => [-4, 3, -3, 4][i], duration: 0.58, stagger: 0.08, yoyo: true, repeat: 3, ease: "sine.inOut" }, 23.08)
-          .to(".mini-phone", { scale: 1.08, boxShadow: "0 28px 74px rgba(52,168,83,.26)", duration: 0.18, stagger: 0.18, yoyo: true, repeat: 1 }, 24.4)
-          .to("#montage", { rotateY: -28, x: -360, scale: 1.22, opacity: 0, filter: "blur(16px)", duration: 0.66, ease: "power4.in" }, 26.24)
-          .set("#montage", { opacity: 0, visibility: "hidden" }, 27.0);
-
-        tl.fromTo("#endBlob", { scale: 0, rotate: -80, filter: "blur(18px)" }, { scale: 1, rotate: 0, filter: "blur(0)", duration: 0.74, ease: "elastic.out(1, 0.5)" }, 27.0)
-          .fromTo("#endBot", { opacity: 0, scale: 0.54, rotateY: 70, y: 60 }, { opacity: 1, scale: 1, rotateY: 0, y: 0, duration: 0.64, ease: "back.out(1.7)" }, 27.16)
-          .to("#future", { opacity: 1, duration: 0.1 }, 27.42)
-          .fromTo("#future .letter", { opacity: 0, y: 70, rotateX: 55 }, { opacity: 1, y: 0, rotateX: 0, duration: 0.44, stagger: 0.015, ease: "elastic.out(1, 0.5)" }, 27.42)
-          .fromTo(".ending-mark", { opacity: 0, y: 34 }, { opacity: 1, y: 0, duration: 0.45 }, 28.08)
-          .to("#future", { textShadow: "0 20px 80px rgba(61,220,132,.28)", scale: 1.04, duration: 0.72, ease: "sine.inOut" }, 28.44)
-          .to("#particleField .particle", { opacity: 1, scale: 2.8, y: -240, duration: 0.8, stagger: 0.035, ease: "power3.in" }, 28.76)
-          .to("#ending", { opacity: 0, filter: "blur(12px)", duration: 0.62 }, 29.36)
-          .set("#ending", { opacity: 0, visibility: "hidden" }, 30.0)
-          .to("#whiteFlash", { opacity: 1, duration: 0.5 }, 29.5);
+    // Seeded PRNG for deterministic particles
+    function mulberry32(a) {
+      return function() {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        var t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
       }
-    </script>
-  </body>
+    }
+    const rng = mulberry32(42);
+
+    // Create particles with deterministic positions
+    const particlesContainer = document.getElementById('particles');
+    for (let i = 0; i < 30; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      p.style.left = (rng() * 1920) + 'px';
+      p.style.top = (rng() * 1080) + 'px';
+      const size = (rng() * 6 + 2) + 'px';
+      p.style.width = size;
+      p.style.height = size;
+      particlesContainer.appendChild(p);
+    }
+
+    // Hook title letters
+    const hookTitle = document.getElementById('hookLetters');
+    'ANDROID CONTROL'.split('').forEach(c => {
+      const span = document.createElement('span');
+      span.className = 'letter';
+      span.textContent = c === ' ' ? '\u00A0' : c;
+      hookTitle.appendChild(span);
+    });
+
+    // Subtitle letters
+    const hookSub = document.getElementById('hookSubtitle');
+    'AI Agents for Mobile UIs'.split('').forEach(c => {
+      const span = document.createElement('span');
+      span.className = 'letter';
+      span.textContent = c === ' ' ? '\u00A0' : c;
+      hookSub.appendChild(span);
+    });
+
+    // ===== SCENE 1: Hook (0-3s) =====
+    
+    tl.to('#blob1', { x: 200, y: 100, duration: 3, ease: 'sine.inOut' }, 0);
+    tl.to('#blob2', { x: -200, y: -100, duration: 3, ease: 'sine.inOut' }, 0);
+
+    tl.fromTo('#androidIcon', 
+      { xPercent: -50, yPercent: -50, opacity: 0, scale: 0.5 }, 
+      { xPercent: -50, yPercent: -50, opacity: 1, scale: 1, duration: 0.6, ease: 'back.out(1.7)' 
+    }, 0.3);
+
+    tl.to('#androidIcon', { y: '-=80', duration: 0.8, ease: 'power2.out' }, 0.5);
+
+    tl.to('#hookTitle', { opacity: 1, duration: 0.1 }, 0.8);
+    tl.to('#hookLetters .letter', { 
+      opacity: 1, 
+      y: 0, 
+      duration: 0.4, 
+      stagger: 0.02, 
+      ease: 'power3.out' 
+    }, 0.8);
+
+    tl.to('#hookSubtitle .letter', { 
+      opacity: 1, 
+      y: 0, 
+      duration: 0.3, 
+      stagger: 0.015, 
+      ease: 'power2.out' 
+    }, 1.4);
+
+    tl.to('.particle', { 
+      opacity: 0.6, 
+      scale: 1.5, 
+      duration: 0.5, 
+      stagger: { each: 0.02, from: 'center' }, 
+      ease: 'power2.out' 
+    }, 0.5);
+
+    tl.to('#hook', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 2.8);
+    tl.set('#hook', { opacity: 0, visibility: 'hidden' }, 3.0);
+
+    // ===== SCENE 2: AI Agent Demo (3-10s) =====
+    
+    tl.set('#demo', { opacity: 1 }, 3.0);
+    tl.fromTo('#demoPhone', { x: -200, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }, 3.0);
+    
+    tl.to('#demoCursor', { x: 550, y: 380, duration: 0.3, ease: 'power2.out' }, 3.3);
+    tl.to('#demoCursorRing', { opacity: 1, scale: 1, duration: 0.2, ease: 'power2.out', overwrite: 'auto' }, 3.3);
+    tl.to('#demoCursorRing', { opacity: 0, scale: 2, duration: 0.3, ease: 'power2.in', overwrite: 'auto' }, 3.6);
+
+    tl.to('#a11yTree', { opacity: 1, duration: 0.5, ease: 'power2.out' }, 3.8);
+    
+    tl.to('#node1', { opacity: 1, x: 0, duration: 0.2 }, 4.0);
+    tl.to('#node2', { opacity: 1, x: 0, duration: 0.2 }, 4.2);
+    tl.to('#node3', { opacity: 1, x: 0, duration: 0.2 }, 4.4);
+    tl.to('#node4', { opacity: 1, x: 0, duration: 0.2 }, 4.6);
+    tl.to('#node5', { opacity: 1, x: 0, duration: 0.2 }, 4.8);
+
+    tl.to('#demoCursor', { x: 600, y: 420, duration: 0.4, ease: 'power2.inOut' }, 5.0);
+    tl.to('#demoCursor', { x: 600, y: 480, duration: 0.4, ease: 'power2.inOut' }, 5.6);
+    tl.to('#demoCursor', { x: 600, y: 540, duration: 0.4, ease: 'power2.inOut' }, 6.2);
+
+    tl.to('#demoCursorRing', { opacity: 1, scale: 1, duration: 0.15, overwrite: 'auto' }, 6.4);
+    tl.to('#demoCursorRing', { opacity: 0, scale: 2.5, duration: 0.3, overwrite: 'auto' }, 6.6);
+
+    tl.to('#demoCaption', { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 6.8);
+
+    tl.to('#demo', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 9.5);
+    tl.set('#demo', { opacity: 0, visibility: 'hidden' }, 9.8);
+
+    // ===== SCENE 3: Metrics (10-20s) =====
+    
+    tl.set('#metrics', { opacity: 1 }, 10.0);
+    
+    tl.fromTo('#metricsLabel', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 10.0);
+
+    let beforeCounter = 0;
+    tl.to({}, { 
+      duration: 1.5,
+      onUpdate: function() {
+        const progress = this.progress();
+        document.getElementById('metricBefore').textContent = Math.round(progress * 39) + '%';
+      }
+    }, 10.5);
+
+    tl.fromTo('#arrowIcon', { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 11.5);
+
+    let afterCounter = 0;
+    tl.to({}, { 
+      duration: 1.5,
+      onUpdate: function() {
+        const progress = this.progress();
+        document.getElementById('metricAfter').textContent = Math.round(39 + progress * 14) + '%';
+      }
+    }, 12.0);
+
+    tl.fromTo('#improvement', { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.6, ease: 'elastic.out(1, 0.5)' }, 13.5);
+    tl.fromTo('#improvementLabel', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 14.0);
+
+    tl.to('.particle', { 
+      opacity: 0.8, 
+      y: '-=100', 
+      duration: 1, 
+      stagger: { each: 0.05, from: 'random' }, 
+      ease: 'power2.out' 
+    }, 13.5);
+
+    tl.to('#metrics', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 19.0);
+    tl.set('#metrics', { opacity: 0, visibility: 'hidden' }, 19.3);
+
+    // ===== SCENE 4: Tasks (20-26s) =====
+    
+    tl.set('#tasks', { opacity: 1 }, 20.0);
+
+    tl.to({}, { 
+      duration: 1.5,
+      onUpdate: function() {
+        const progress = this.progress();
+        document.getElementById('tasksNumber').textContent = Math.round(progress * 116);
+      }
+    }, 20.0);
+
+    tl.fromTo('#tasksLabel', { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 20.5);
+
+    tl.to('#badge1', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.0);
+    tl.to('#badge2', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.2);
+    tl.to('#badge3', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.4);
+    tl.to('#badge4', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.6);
+    tl.to('#badge5', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.8);
+    tl.to('#badge6', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 22.0);
+
+    tl.to('#tasks', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 25.5);
+    tl.set('#tasks', { opacity: 0, visibility: 'hidden' }, 25.8);
+
+    // ===== SCENE 5: Ending (26-30s) =====
+    
+    tl.set('#ending', { opacity: 1 }, 26.0);
+
+    tl.fromTo('#endingTitle', { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.8, ease: 'power2.out' }, 26.0);
+    tl.fromTo('#endingSubtitle', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 27.0);
+
+    tl.to('.particle', { 
+      opacity: 0.4, 
+      scale: 2, 
+      y: '-=200', 
+      duration: 2, 
+      stagger: { each: 0.03, from: 'center' }, 
+      ease: 'power2.out' 
+    }, 26.5);
+
+    tl.to('#ending', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 29.5);
+    tl.set('#ending', { opacity: 0, visibility: 'hidden' }, 29.8);
+  </script>
+</body>
 </html>
