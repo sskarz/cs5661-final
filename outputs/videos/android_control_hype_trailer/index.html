@@ -7,192 +7,152 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
   body {
-    width: 1920px;
-    height: 1080px;
-    overflow: hidden;
-    background: #FAFAFA;
-    font-family: 'Inter', sans-serif;
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: #FAFAFA; font-family: 'Inter', sans-serif;
   }
-
   .bg-gradient {
-    position: absolute;
-    width: 100%;
-    height: 100%;
+    position: absolute; width: 100%; height: 100%;
     background: linear-gradient(135deg, #FAFAFA 0%, #F5F5F5 50%, #E8F5E9 100%);
   }
-
   .grid-pattern {
-    position: absolute;
-    width: 100%;
-    height: 100%;
+    position: absolute; width: 100%; height: 100%;
     background-image: 
-      linear-gradient(rgba(61, 220, 132, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(61, 220, 132, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(61,220,132,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(61,220,132,0.03) 1px, transparent 1px);
     background-size: 60px 60px;
   }
-
   .particle {
-    position: absolute;
-    width: 6px;
-    height: 6px;
-    background: #3DDC84;
-    border-radius: 50%;
-    opacity: 0;
+    position: absolute; border-radius: 50%;
+    background: #3DDC84; opacity: 0;
   }
-
+  .blob {
+    position: absolute; border-radius: 50%;
+    background: linear-gradient(135deg, #3DDC84, #4285F4);
+    opacity: 0.08; filter: blur(60px);
+  }
+  
+  /* Phone mockup */
   .phone {
-    position: absolute;
-    width: 280px;
-    height: 560px;
-    background: #1a1a1a;
-    border-radius: 36px;
+    position: absolute; width: 280px; height: 560px;
+    background: #1a1a1a; border-radius: 36px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.15);
     overflow: hidden;
   }
-
   .phone-screen {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    background: #fff;
-    border-radius: 24px;
-    overflow: hidden;
+    position: absolute; top: 12px; left: 12px; right: 12px; bottom: 12px;
+    background: #fff; border-radius: 24px; overflow: hidden;
   }
-
   .phone-notch {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 120px;
-    height: 28px;
-    background: #1a1a1a;
-    border-radius: 0 0 16px 16px;
-    z-index: 10;
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 120px; height: 28px; background: #1a1a1a;
+    border-radius: 0 0 16px 16px; z-index: 10;
   }
-
+  
+  /* AI Cursor */
   .cursor {
-    position: absolute;
-    width: 24px;
-    height: 24px;
-    z-index: 100;
-    filter: drop-shadow(0 2px 8px rgba(61, 220, 132, 0.5));
+    position: absolute; width: 24px; height: 24px; z-index: 100;
+    filter: drop-shadow(0 2px 8px rgba(61,220,132,0.5));
   }
-
   .cursor::before {
-    content: '';
-    position: absolute;
-    width: 0;
-    height: 0;
+    content: ''; position: absolute;
     border-left: 12px solid #3DDC84;
     border-right: 12px solid transparent;
     border-top: 12px solid transparent;
     border-bottom: 12px solid transparent;
     transform: rotate(-30deg);
   }
-
   .cursor-ring {
-    position: absolute;
-    width: 40px;
-    height: 40px;
-    border: 3px solid #3DDC84;
-    border-radius: 50%;
-    opacity: 0;
-    transform: translate(-50%, -50%);
+    position: absolute; width: 40px; height: 40px;
+    border: 3px solid #3DDC84; border-radius: 50%;
+    opacity: 0; transform: translate(-50%, -50%);
   }
-
+  
+  /* Accessibility tree */
   .a11y-tree {
-    position: absolute;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 12px;
-    padding: 16px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    line-height: 1.6;
+    position: absolute; background: rgba(255,255,255,0.95);
+    border-radius: 12px; padding: 16px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6;
     box-shadow: 0 8px 32px rgba(0,0,0,0.08);
     border: 2px solid #3DDC84;
   }
-
-  .a11y-node {
-    padding: 2px 0;
-    opacity: 0;
-  }
-
+  .a11y-node { padding: 2px 0; opacity: 0; }
   .a11y-highlight {
-    background: rgba(61, 220, 132, 0.15);
-    padding: 2px 6px;
-    border-radius: 4px;
-    color: #07C160;
-    font-weight: 700;
+    background: rgba(61,220,132,0.15); padding: 2px 6px;
+    border-radius: 4px; color: #07C160; font-weight: 700;
   }
-
-  .letter {
-    display: inline-block;
-    opacity: 0;
+  
+  /* UI elements */
+  .ui-item {
+    padding: 12px; background: #f5f5f5; border-radius: 8px;
+    display: flex; align-items: center; gap: 12px;
+    transition: all 0.3s ease;
   }
-
-  .metric-number {
-    font-size: 120px;
-    font-weight: 900;
-    color: #07C160;
-    line-height: 1;
+  .ui-item.active {
+    background: rgba(61,220,132,0.2);
+    border: 2px solid #3DDC84;
   }
-
-  .metric-label {
-    font-size: 24px;
-    font-weight: 600;
-    color: #666;
-    margin-top: 8px;
+  .ui-icon {
+    width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;
   }
-
+  .ui-label { font-size: 13px; color: #333; }
+  .ui-toggle {
+    width: 40px; height: 24px; background: #ddd;
+    border-radius: 12px; margin-left: auto; position: relative;
+    transition: all 0.3s ease;
+  }
+  .ui-toggle.on { background: #3DDC84; }
+  .ui-toggle::after {
+    content: ''; position: absolute; width: 20px; height: 20px;
+    background: white; border-radius: 50%; top: 2px; left: 2px;
+    transition: all 0.3s ease;
+  }
+  .ui-toggle.on::after { left: 18px; }
+  
+  /* Success badge */
   .success-badge {
-    position: absolute;
-    width: 40px;
-    height: 40px;
-    background: #3DDC84;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 20px;
-    font-weight: 700;
-    opacity: 0;
+    position: absolute; width: 40px; height: 40px;
+    background: #3DDC84; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 20px; font-weight: 700; opacity: 0;
   }
-
-  .blob {
-    position: absolute;
-    width: 300px;
-    height: 300px;
-    background: linear-gradient(135deg, #3DDC84, #4285F4);
-    border-radius: 50%;
-    opacity: 0.1;
-    filter: blur(60px);
-  }
+  
+  /* Letter animation */
+  .letter { display: inline-block; opacity: 0; }
 </style>
 </head>
 <body>
   <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" style="position: absolute; width: 100%; height: 100%;">
     <div class="bg-gradient"></div>
     <div class="grid-pattern"></div>
-
-    <div class="blob" id="blob1" style="top: -100px; right: -100px;"></div>
-    <div class="blob" id="blob2" style="bottom: -100px; left: -100px;"></div>
-
+    
+    <!-- Blobs -->
+    <div class="blob" id="blob1" style="top: -100px; right: -100px; width: 300px; height: 300px;"></div>
+    <div class="blob" id="blob2" style="bottom: -100px; left: -100px; width: 300px; height: 300px;"></div>
+    
+    <!-- Particles -->
     <div id="particles"></div>
-
+    
     <!-- Scene 1: Hook (0-3s) -->
     <div id="hook" style="position: absolute; width: 100%; height: 100%;">
-      <div id="androidIcon" style="position: absolute; top: 50%; left: 50%; width: 120px; height: 160px; opacity: 0;">
-        <svg viewBox="0 0 120 160" fill="none" width="120" height="160">
-          <path d="M60 20 C40 20 25 40 25 65 L25 100 L35 100 L35 130 C35 140 45 145 50 145 L70 145 C75 145 85 140 85 130 L85 100 L95 100 L95 65 C95 40 80 20 60 20 Z" fill="#3DDC84"/>
-          <circle cx="45" cy="55" r="8" fill="white"/>
-          <circle cx="75" cy="55" r="8" fill="white"/>
-          <rect x="30" y="80" width="60" height="10" rx="5" fill="rgba(255,255,255,0.3)"/>
+      <div id="androidIcon" style="position: absolute; top: 50%; left: 50%; width: 160px; height: 160px; opacity: 0;">
+        <!-- Official Android robot SVG -->
+        <svg viewBox="0 0 160 160" fill="none">
+          <!-- Head -->
+          <path d="M80 20 C60 20 45 35 45 55 L45 75 L55 75 L55 95 C55 100 60 105 65 105 L95 105 C100 105 105 100 105 95 L105 75 L115 75 L115 55 C115 35 100 20 80 20 Z" fill="#3DDC84"/>
+          <!-- Eyes -->
+          <circle cx="65" cy="50" r="8" fill="white"/>
+          <circle cx="95" cy="50" r="8" fill="white"/>
+          <circle cx="65" cy="50" r="5" fill="#333"/>
+          <circle cx="95" cy="50" r="5" fill="#333"/>
+          <!-- Smile -->
+          <path d="M70 65 Q80 75 90 65" stroke="white" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <!-- Arms -->
+          <path d="M45 80 Q30 85 30 100 Q30 110 40 110 L50 110 L50 100 Z" fill="#3DDC84"/>
+          <path d="M115 80 Q130 85 130 100 Q130 110 120 110 L110 110 L110 100 Z" fill="#3DDC84"/>
+          <!-- Legs -->
+          <path d="M65 105 L65 125 Q65 135 75 135 L85 135 Q95 135 95 125 L95 105" fill="#3DDC84"/>
+          <line x1="80" y1="105" x2="80" y2="125" stroke="#2ECC71" stroke-width="2"/>
         </svg>
       </div>
       <div id="hookTitle" style="position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); text-align: center; opacity: 0;">
@@ -200,91 +160,144 @@
         <div style="font-size: 28px; font-weight: 600; color: #3DDC84; margin-top: 16px;" id="hookSubtitle"></div>
       </div>
     </div>
-
-    <!-- Scene 2: AI Agent Demo (3-10s) -->
-    <div id="demo" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
-      <div id="demoPhone" class="phone" style="left: 400px; top: 260px;">
-        <div class="phone-screen">
+    
+    <!-- Scene 2: Phone Demo 1 - Settings (3-8s) -->
+    <div id="demo1" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
+      <div id="phone1" class="phone" style="left: 400px; top: 260px;">
+        <div class="phone-screen" id="screen1">
           <div class="phone-notch"></div>
           <div style="padding: 40px 16px 16px;">
             <div style="font-size: 14px; color: #666; margin-bottom: 8px;">Settings</div>
             <div style="display: flex; flex-direction: column; gap: 8px;">
-              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
-                <div style="width: 24px; height: 24px; background: #4285F4; border-radius: 6px;"></div>
-                <div style="font-size: 13px; color: #333;">Wi-Fi</div>
+              <div class="ui-item" id="item1">
+                <div class="ui-icon" style="background: #4285F4;"></div>
+                <div class="ui-label">Wi-Fi</div>
+                <div class="ui-toggle" id="toggle1"></div>
               </div>
-              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
-                <div style="width: 24px; height: 24px; background: #3DDC84; border-radius: 6px;"></div>
-                <div style="font-size: 13px; color: #333;">Bluetooth</div>
+              <div class="ui-item" id="item2">
+                <div class="ui-icon" style="background: #3DDC84;"></div>
+                <div class="ui-label">Bluetooth</div>
+                <div class="ui-toggle" id="toggle2"></div>
               </div>
-              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
-                <div style="width: 24px; height: 24px; background: #FF6B6B; border-radius: 6px;"></div>
-                <div style="font-size: 13px; color: #333;">Display</div>
+              <div class="ui-item" id="item3">
+                <div class="ui-icon" style="background: #FF6B6B;"></div>
+                <div class="ui-label">Dark Mode</div>
+                <div class="ui-toggle" id="toggle3"></div>
               </div>
-              <div style="padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
-                <div style="width: 24px; height: 24px; background: #FFB74D; border-radius: 6px;"></div>
-                <div style="font-size: 13px; color: #333;">Battery</div>
+              <div class="ui-item" id="item4">
+                <div class="ui-icon" style="background: #FFB74D;"></div>
+                <div class="ui-label">Battery Saver</div>
+                <div class="ui-toggle" id="toggle4"></div>
               </div>
             </div>
           </div>
         </div>
       </div>
-      <div id="demoCursor" class="cursor" style="left: 550px; top: 380px;"></div>
-      <div id="demoCursorRing" class="cursor-ring" style="left: 550px; top: 380px;"></div>
+      <div id="cursor1" class="cursor" style="left: 550px; top: 380px;"></div>
+      <div id="cursorRing1" class="cursor-ring" style="left: 550px; top: 380px;"></div>
       
-      <div id="a11yTree" class="a11y-tree" style="right: 200px; top: 200px; width: 400px; opacity: 0;">
+      <div id="a11yTree1" class="a11y-tree" style="right: 200px; top: 200px; width: 400px; opacity: 0;">
         <div style="font-size: 13px; font-weight: 700; color: #3DDC84; margin-bottom: 8px;">Accessibility Tree</div>
-        <div class="a11y-node" id="node1"><span class="a11y-highlight">[0]</span> <span style="color: #666;">FrameLayout</span></div>
-        <div class="a11y-node" id="node2">&nbsp;&nbsp;<span class="a11y-highlight">[1]</span> <span style="color: #666;">RecyclerView</span></div>
-        <div class="a11y-node" id="node3">&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight">[2]</span> <span style="color: #333;">LinearLayout</span></div>
-        <div class="a11y-node" id="node4">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight">[3]</span> <span style="color: #333;">TextView</span> <span style="color: #999;">"Wi-Fi"</span></div>
-        <div class="a11y-node" id="node5">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight" style="background: rgba(61,220,132,0.3); border: 2px solid #3DDC84;">[4]</span> <span style="color: #07C160; font-weight: 700;">Switch</span> <span style="color: #999;">"enabled"</span></div>
+        <div class="a11y-node" id="n1_1"><span class="a11y-highlight">[0]</span> <span style="color: #666;">FrameLayout</span></div>
+        <div class="a11y-node" id="n1_2">&nbsp;&nbsp;<span class="a11y-highlight">[1]</span> <span style="color: #666;">RecyclerView</span></div>
+        <div class="a11y-node" id="n1_3">&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight">[2]</span> <span style="color: #333;">LinearLayout</span></div>
+        <div class="a11y-node" id="n1_4">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight">[3]</span> <span style="color: #333;">TextView</span> <span style="color: #999;">"Wi-Fi"</span></div>
+        <div class="a11y-node" id="n1_5">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight" style="background: rgba(61,220,132,0.3); border: 2px solid #3DDC84;">[4]</span> <span style="color: #07C160; font-weight: 700;">Switch</span> <span style="color: #999;">"enabled"</span></div>
       </div>
-
-      <div id="demoText" style="position: absolute; left: 400px; top: 880px; text-align: center; width: 100%;">
-        <div style="font-size: 28px; font-weight: 700; color: #333; opacity: 0;" id="demoCaption">
-          AI navigates the accessibility tree → understands UI → takes action
+      
+      <div style="position: absolute; left: 400px; top: 880px; text-align: center; width: 100%;">
+        <div style="font-size: 24px; font-weight: 700; color: #333; opacity: 0;" id="caption1">
+          AI reads UI → taps elements → changes settings
         </div>
       </div>
     </div>
-
-    <!-- Scene 3: Metrics (10-20s) -->
+    
+    <!-- Scene 3: Phone Demo 2 - Navigation (8-14s) -->
+    <div id="demo2" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
+      <div id="phone2" class="phone" style="right: 400px; top: 260px;">
+        <div class="phone-screen" id="screen2">
+          <div class="phone-notch"></div>
+          <div style="padding: 40px 16px 16px; height: 100%;">
+            <div style="font-size: 14px; color: #666; margin-bottom: 8px;">Maps</div>
+            <div style="background: #e8f5e9; border-radius: 12px; height: 300px; position: relative; overflow: hidden;">
+              <!-- Simple map representation -->
+              <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40px; height: 40px; background: #4285F4; border-radius: 50%; border: 4px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3);"></div>
+              <div style="position: absolute; top: 30%; left: 60%; width: 20px; height: 20px; background: #FF6B6B; border-radius: 50%;"></div>
+              <div style="position: absolute; top: 70%; left: 40%; width: 20px; height: 20px; background: #FFB74D; border-radius: 50%;"></div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px;">
+              <div class="ui-item" id="map1">
+                <div class="ui-icon" style="background: #4285F4;"></div>
+                <div class="ui-label">Navigation</div>
+              </div>
+              <div class="ui-item" id="map2">
+                <div class="ui-icon" style="background: #3DDC84;"></div>
+                <div class="ui-label">Search</div>
+              </div>
+              <div class="ui-item" id="map3">
+                <div class="ui-icon" style="background: #FF6B6B;"></div>
+                <div class="ui-label">Traffic</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="cursor2" class="cursor" style="right: 550px; top: 380px;"></div>
+      <div id="cursorRing2" class="cursor-ring" style="right: 550px; top: 380px;"></div>
+      
+      <div id="a11yTree2" class="a11y-tree" style="left: 200px; top: 200px; width: 400px; opacity: 0;">
+        <div style="font-size: 13px; font-weight: 700; color: #3DDC84; margin-bottom: 8px;">Accessibility Tree</div>
+        <div class="a11y-node" id="n2_1"><span class="a11y-highlight">[0]</span> <span style="color: #666;">FrameLayout</span></div>
+        <div class="a11y-node" id="n2_2">&nbsp;&nbsp;<span class="a11y-highlight">[1]</span> <span style="color: #666;">MapView</span></div>
+        <div class="a11y-node" id="n2_3">&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight">[2]</span> <span style="color: #333;">Marker</span> <span style="color: #999;">"You are here"</span></div>
+        <div class="a11y-node" id="n2_4">&nbsp;&nbsp;<span class="a11y-highlight">[3]</span> <span style="color: #666;">RecyclerView</span></div>
+        <div class="a11y-node" id="n2_5">&nbsp;&nbsp;&nbsp;&nbsp;<span class="a11y-highlight" style="background: rgba(61,220,132,0.3); border: 2px solid #3DDC84;">[4]</span> <span style="color: #07C160; font-weight: 700;">Button</span> <span style="color: #999;">"Navigation"</span></div>
+      </div>
+      
+      <div style="position: absolute; right: 400px; top: 880px; text-align: center; width: 100%;">
+        <div style="font-size: 24px; font-weight: 700; color: #333; opacity: 0;" id="caption2">
+          AI navigates apps → finds targets → executes actions
+        </div>
+      </div>
+    </div>
+    
+    <!-- Scene 4: Metrics (14-20s) -->
     <div id="metrics" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
       <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
-        <div style="font-size: 24px; font-weight: 600; color: #666; margin-bottom: 16px;" id="metricsLabel">Zero-shot → Trained</div>
+        <div style="font-size: 24px; font-weight: 600; color: #666; margin-bottom: 16px;" id="metricsLabel">Zero-shot → Fine-tuned</div>
         <div style="display: flex; align-items: center; gap: 60px; justify-content: center;">
           <div>
-            <div class="metric-number" id="metricBefore" style="color: #999;">0%</div>
-            <div class="metric-label">Baseline</div>
+            <div style="font-size: 120px; font-weight: 900; color: #999; line-height: 1;" id="metricBefore">0%</div>
+            <div style="font-size: 24px; font-weight: 600; color: #666; margin-top: 8px;">Baseline</div>
           </div>
           <div style="font-size: 60px; color: #3DDC84; font-weight: 700;" id="arrowIcon">→</div>
           <div>
-            <div class="metric-number" id="metricAfter" style="color: #07C160;">0%</div>
-            <div class="metric-label">Trained</div>
+            <div style="font-size: 120px; font-weight: 900; color: #07C160; line-height: 1;" id="metricAfter">0%</div>
+            <div style="font-size: 24px; font-weight: 600; color: #666; margin-top: 8px;">Trained</div>
           </div>
         </div>
         <div style="margin-top: 40px;">
           <div style="font-size: 80px; font-weight: 900; color: #3DDC84; opacity: 0;" id="improvement">+35%</div>
-          <div style="font-size: 24px; font-weight: 600; color: #666; margin-top: 8px; opacity: 0;" id="improvementLabel">Improvement</div>
+          <div style="font-size: 24px; font-weight: 600; color: #666; margin-top: 8px; opacity: 0;" id="improvementLabel">Relative Improvement</div>
         </div>
       </div>
     </div>
-
-    <!-- Scene 4: Tasks Montage (20-26s) -->
+    
+    <!-- Scene 5: Tasks (20-26s) -->
     <div id="tasks" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
       <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
         <div style="font-size: 120px; font-weight: 900; color: #07C160; line-height: 1;" id="tasksNumber">0</div>
         <div style="font-size: 36px; font-weight: 700; color: #333; margin-top: 16px;" id="tasksLabel">Android Tasks Mastered</div>
       </div>
-      <div class="success-badge" id="badge1" style="top: 200px; left: 300px;">✓</div>
-      <div class="success-badge" id="badge2" style="top: 300px; right: 400px;">✓</div>
-      <div class="success-badge" id="badge3" style="bottom: 300px; left: 500px;">✓</div>
-      <div class="success-badge" id="badge4" style="bottom: 200px; right: 300px;">✓</div>
-      <div class="success-badge" id="badge5" style="top: 400px; left: 200px;">✓</div>
-      <div class="success-badge" id="badge6" style="top: 500px; right: 200px;">✓</div>
+      <div id="badge1" class="success-badge" style="top: 200px; left: 300px;">✓</div>
+      <div id="badge2" class="success-badge" style="top: 300px; right: 400px;">✓</div>
+      <div id="badge3" class="success-badge" style="bottom: 300px; left: 500px;">✓</div>
+      <div id="badge4" class="success-badge" style="bottom: 200px; right: 300px;">✓</div>
+      <div id="badge5" class="success-badge" style="top: 400px; left: 200px;">✓</div>
+      <div id="badge6" class="success-badge" style="top: 500px; right: 200px;">✓</div>
     </div>
-
-    <!-- Scene 5: Ending (26-30s) -->
+    
+    <!-- Scene 6: Ending (26-30s) -->
     <div id="ending" style="position: absolute; width: 100%; height: 100%; opacity: 0;">
       <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
         <div style="font-size: 72px; font-weight: 900; color: #1a1a1a; line-height: 1.2; opacity: 0;" id="endingTitle">THE FUTURE OF<br><span style="color: #3DDC84;">MOBILE</span></div>
@@ -298,8 +311,8 @@
     window.__timelines = window.__timelines || {};
     window.__timelines["main"] = gsap.timeline({ paused: true });
     const tl = window.__timelines["main"];
-
-    // Seeded PRNG for deterministic particles
+    
+    // Seeded PRNG
     function mulberry32(a) {
       return function() {
         a |= 0; a = a + 0x6D2B79F5 | 0;
@@ -309,8 +322,8 @@
       }
     }
     const rng = mulberry32(42);
-
-    // Create particles with deterministic positions
+    
+    // Create particles
     const particlesContainer = document.getElementById('particles');
     for (let i = 0; i < 30; i++) {
       const p = document.createElement('div');
@@ -322,7 +335,7 @@
       p.style.height = size;
       particlesContainer.appendChild(p);
     }
-
+    
     // Hook title letters
     const hookTitle = document.getElementById('hookLetters');
     'ANDROID CONTROL'.split('').forEach(c => {
@@ -331,8 +344,7 @@
       span.textContent = c === ' ' ? '\u00A0' : c;
       hookTitle.appendChild(span);
     });
-
-    // Subtitle letters
+    
     const hookSub = document.getElementById('hookSubtitle');
     'AI Agents for Mobile UIs'.split('').forEach(c => {
       const span = document.createElement('span');
@@ -340,82 +352,107 @@
       span.textContent = c === ' ' ? '\u00A0' : c;
       hookSub.appendChild(span);
     });
-
-    // ===== SCENE 1: Hook (0-3s) =====
     
+    // ===== SCENE 1: Hook (0-3s) =====
     tl.to('#blob1', { x: 200, y: 100, duration: 3, ease: 'sine.inOut' }, 0);
     tl.to('#blob2', { x: -200, y: -100, duration: 3, ease: 'sine.inOut' }, 0);
-
+    
     tl.fromTo('#androidIcon', 
       { xPercent: -50, yPercent: -50, opacity: 0, scale: 0.5 }, 
       { xPercent: -50, yPercent: -50, opacity: 1, scale: 1, duration: 0.6, ease: 'back.out(1.7)' 
     }, 0.3);
-
+    
     tl.to('#androidIcon', { y: '-=80', duration: 0.8, ease: 'power2.out' }, 0.5);
-
+    
     tl.to('#hookTitle', { opacity: 1, duration: 0.1 }, 0.8);
     tl.to('#hookLetters .letter', { 
-      opacity: 1, 
-      y: 0, 
-      duration: 0.4, 
-      stagger: 0.02, 
-      ease: 'power3.out' 
+      opacity: 1, y: 0, duration: 0.4, stagger: 0.02, ease: 'power3.out' 
     }, 0.8);
-
+    
     tl.to('#hookSubtitle .letter', { 
-      opacity: 1, 
-      y: 0, 
-      duration: 0.3, 
-      stagger: 0.015, 
-      ease: 'power2.out' 
+      opacity: 1, y: 0, duration: 0.3, stagger: 0.015, ease: 'power2.out' 
     }, 1.4);
-
+    
     tl.to('.particle', { 
-      opacity: 0.6, 
-      scale: 1.5, 
-      duration: 0.5, 
-      stagger: { each: 0.02, from: 'center' }, 
-      ease: 'power2.out' 
+      opacity: 0.6, scale: 1.5, duration: 0.5, 
+      stagger: { each: 0.02, from: 'center' }, ease: 'power2.out' 
     }, 0.5);
-
+    
     tl.to('#hook', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 2.8);
     tl.set('#hook', { opacity: 0, visibility: 'hidden' }, 3.0);
-
-    // ===== SCENE 2: AI Agent Demo (3-10s) =====
     
-    tl.set('#demo', { opacity: 1 }, 3.0);
-    tl.fromTo('#demoPhone', { x: -200, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }, 3.0);
+    // ===== SCENE 2: Phone Demo 1 - Settings (3-8s) =====
+    tl.set('#demo1', { opacity: 1 }, 3.0);
+    tl.fromTo('#phone1', { x: -200, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }, 3.0);
     
-    tl.to('#demoCursor', { x: 550, y: 380, duration: 0.3, ease: 'power2.out' }, 3.3);
-    tl.to('#demoCursorRing', { opacity: 1, scale: 1, duration: 0.2, ease: 'power2.out', overwrite: 'auto' }, 3.3);
-    tl.to('#demoCursorRing', { opacity: 0, scale: 2, duration: 0.3, ease: 'power2.in', overwrite: 'auto' }, 3.6);
-
-    tl.to('#a11yTree', { opacity: 1, duration: 0.5, ease: 'power2.out' }, 3.8);
+    // Cursor moves to first item
+    tl.to('#cursor1', { x: 550, y: 380, duration: 0.3, ease: 'power2.out' }, 3.3);
+    tl.to('#cursorRing1', { opacity: 1, scale: 1, duration: 0.2, ease: 'power2.out', overwrite: 'auto' }, 3.3);
+    tl.to('#cursorRing1', { opacity: 0, scale: 2, duration: 0.3, ease: 'power2.in', overwrite: 'auto' }, 3.6);
     
-    tl.to('#node1', { opacity: 1, x: 0, duration: 0.2 }, 4.0);
-    tl.to('#node2', { opacity: 1, x: 0, duration: 0.2 }, 4.2);
-    tl.to('#node3', { opacity: 1, x: 0, duration: 0.2 }, 4.4);
-    tl.to('#node4', { opacity: 1, x: 0, duration: 0.2 }, 4.6);
-    tl.to('#node5', { opacity: 1, x: 0, duration: 0.2 }, 4.8);
-
-    tl.to('#demoCursor', { x: 600, y: 420, duration: 0.4, ease: 'power2.inOut' }, 5.0);
-    tl.to('#demoCursor', { x: 600, y: 480, duration: 0.4, ease: 'power2.inOut' }, 5.6);
-    tl.to('#demoCursor', { x: 600, y: 540, duration: 0.4, ease: 'power2.inOut' }, 6.2);
-
-    tl.to('#demoCursorRing', { opacity: 1, scale: 1, duration: 0.15, overwrite: 'auto' }, 6.4);
-    tl.to('#demoCursorRing', { opacity: 0, scale: 2.5, duration: 0.3, overwrite: 'auto' }, 6.6);
-
-    tl.to('#demoCaption', { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 6.8);
-
-    tl.to('#demo', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 9.5);
-    tl.set('#demo', { opacity: 0, visibility: 'hidden' }, 9.8);
-
-    // ===== SCENE 3: Metrics (10-20s) =====
+    // Show accessibility tree
+    tl.to('#a11yTree1', { opacity: 1, duration: 0.5, ease: 'power2.out' }, 3.8);
     
-    tl.set('#metrics', { opacity: 1 }, 10.0);
+    // Tree nodes appear
+    tl.to('#n1_1', { opacity: 1, x: 0, duration: 0.2 }, 4.0);
+    tl.to('#n1_2', { opacity: 1, x: 0, duration: 0.2 }, 4.2);
+    tl.to('#n1_3', { opacity: 1, x: 0, duration: 0.2 }, 4.4);
+    tl.to('#n1_4', { opacity: 1, x: 0, duration: 0.2 }, 4.6);
+    tl.to('#n1_5', { opacity: 1, x: 0, duration: 0.2 }, 4.8);
     
-    tl.fromTo('#metricsLabel', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 10.0);
-
+    // Cursor moves and taps
+    tl.to('#cursor1', { x: 600, y: 420, duration: 0.4, ease: 'power2.inOut' }, 5.0);
+    tl.to('#item1', { backgroundColor: 'rgba(61,220,132,0.2)', duration: 0.3 }, 5.2);
+    tl.to('#toggle1', { backgroundColor: '#3DDC84', duration: 0.3 }, 5.2);
+    
+    tl.to('#cursor1', { x: 600, y: 480, duration: 0.4, ease: 'power2.inOut' }, 5.6);
+    tl.to('#item2', { backgroundColor: 'rgba(61,220,132,0.2)', duration: 0.3 }, 5.8);
+    tl.to('#toggle2', { backgroundColor: '#3DDC84', duration: 0.3 }, 5.8);
+    
+    tl.to('#cursorRing1', { opacity: 1, scale: 1, duration: 0.15, overwrite: 'auto' }, 6.0);
+    tl.to('#cursorRing1', { opacity: 0, scale: 2.5, duration: 0.3, overwrite: 'auto' }, 6.15);
+    
+    tl.to('#caption1', { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 6.5);
+    
+    tl.to('#demo1', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 7.5);
+    tl.set('#demo1', { opacity: 0, visibility: 'hidden' }, 7.8);
+    
+    // ===== SCENE 3: Phone Demo 2 - Maps (8-14s) =====
+    tl.set('#demo2', { opacity: 1 }, 8.0);
+    tl.fromTo('#phone2', { x: 200, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8, ease: 'power3.out' }, 8.0);
+    
+    // Cursor moves
+    tl.to('#cursor2', { x: -550, y: 380, duration: 0.3, ease: 'power2.out' }, 8.3);
+    tl.to('#cursorRing2', { opacity: 1, scale: 1, duration: 0.2, ease: 'power2.out', overwrite: 'auto' }, 8.3);
+    tl.to('#cursorRing2', { opacity: 0, scale: 2, duration: 0.3, ease: 'power2.in', overwrite: 'auto' }, 8.6);
+    
+    // Show accessibility tree
+    tl.to('#a11yTree2', { opacity: 1, duration: 0.5, ease: 'power2.out' }, 8.8);
+    
+    // Tree nodes
+    tl.to('#n2_1', { opacity: 1, x: 0, duration: 0.2 }, 9.0);
+    tl.to('#n2_2', { opacity: 1, x: 0, duration: 0.2 }, 9.2);
+    tl.to('#n2_3', { opacity: 1, x: 0, duration: 0.2 }, 9.4);
+    tl.to('#n2_4', { opacity: 1, x: 0, duration: 0.2 }, 9.6);
+    tl.to('#n2_5', { opacity: 1, x: 0, duration: 0.2 }, 9.8);
+    
+    // Cursor taps navigation
+    tl.to('#cursor2', { x: -600, y: 420, duration: 0.4, ease: 'power2.inOut' }, 10.0);
+    tl.to('#map1', { backgroundColor: 'rgba(61,220,132,0.2)', duration: 0.3 }, 10.2);
+    
+    tl.to('#cursorRing2', { opacity: 1, scale: 1, duration: 0.15, overwrite: 'auto' }, 10.4);
+    tl.to('#cursorRing2', { opacity: 0, scale: 2.5, duration: 0.3, overwrite: 'auto' }, 10.55);
+    
+    tl.to('#caption2', { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 10.8);
+    
+    tl.to('#demo2', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 13.5);
+    tl.set('#demo2', { opacity: 0, visibility: 'hidden' }, 13.8);
+    
+    // ===== SCENE 4: Metrics (14-20s) =====
+    tl.set('#metrics', { opacity: 1 }, 14.0);
+    
+    tl.fromTo('#metricsLabel', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 14.0);
+    
     let beforeCounter = 0;
     tl.to({}, { 
       duration: 1.5,
@@ -423,10 +460,10 @@
         const progress = this.progress();
         document.getElementById('metricBefore').textContent = Math.round(progress * 39) + '%';
       }
-    }, 10.5);
-
-    tl.fromTo('#arrowIcon', { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 11.5);
-
+    }, 14.5);
+    
+    tl.fromTo('#arrowIcon', { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 15.5);
+    
     let afterCounter = 0;
     tl.to({}, { 
       duration: 1.5,
@@ -434,26 +471,22 @@
         const progress = this.progress();
         document.getElementById('metricAfter').textContent = Math.round(39 + progress * 14) + '%';
       }
-    }, 12.0);
-
-    tl.fromTo('#improvement', { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.6, ease: 'elastic.out(1, 0.5)' }, 13.5);
-    tl.fromTo('#improvementLabel', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 14.0);
-
+    }, 16.0);
+    
+    tl.fromTo('#improvement', { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.6, ease: 'elastic.out(1, 0.5)' }, 17.5);
+    tl.fromTo('#improvementLabel', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 18.0);
+    
     tl.to('.particle', { 
-      opacity: 0.8, 
-      y: '-=100', 
-      duration: 1, 
-      stagger: { each: 0.05, from: 'random' }, 
-      ease: 'power2.out' 
-    }, 13.5);
-
+      opacity: 0.8, y: '-=100', duration: 1, 
+      stagger: { each: 0.05, from: 'random' }, ease: 'power2.out' 
+    }, 17.5);
+    
     tl.to('#metrics', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 19.0);
     tl.set('#metrics', { opacity: 0, visibility: 'hidden' }, 19.3);
-
-    // ===== SCENE 4: Tasks (20-26s) =====
     
+    // ===== SCENE 5: Tasks (20-26s) =====
     tl.set('#tasks', { opacity: 1 }, 20.0);
-
+    
     tl.to({}, { 
       duration: 1.5,
       onUpdate: function() {
@@ -461,37 +494,35 @@
         document.getElementById('tasksNumber').textContent = Math.round(progress * 116);
       }
     }, 20.0);
-
+    
     tl.fromTo('#tasksLabel', { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 20.5);
-
+    
     tl.to('#badge1', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.0);
     tl.to('#badge2', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.2);
     tl.to('#badge3', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.4);
     tl.to('#badge4', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.6);
     tl.to('#badge5', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 21.8);
     tl.to('#badge6', { opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(1.7)' }, 22.0);
-
+    
     tl.to('#tasks', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 25.5);
     tl.set('#tasks', { opacity: 0, visibility: 'hidden' }, 25.8);
-
-    // ===== SCENE 5: Ending (26-30s) =====
     
+    // ===== SCENE 6: Ending (26-30s) =====
     tl.set('#ending', { opacity: 1 }, 26.0);
-
+    
     tl.fromTo('#endingTitle', { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.8, ease: 'power2.out' }, 26.0);
     tl.fromTo('#endingSubtitle', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 27.0);
-
+    
     tl.to('.particle', { 
-      opacity: 0.4, 
-      scale: 2, 
-      y: '-=200', 
-      duration: 2, 
-      stagger: { each: 0.03, from: 'center' }, 
-      ease: 'power2.out' 
+      opacity: 0.4, scale: 2, y: '-=200', duration: 2, 
+      stagger: { each: 0.03, from: 'center' }, ease: 'power2.out' 
     }, 26.5);
-
+    
     tl.to('#ending', { opacity: 0, duration: 0.5, ease: 'power2.in' }, 29.5);
     tl.set('#ending', { opacity: 0, visibility: 'hidden' }, 29.8);
+    
+    // Force timeline to 30 seconds
+    tl.to({}, { duration: 0.1 }, 30.0);
   </script>
 </body>
 </html>
