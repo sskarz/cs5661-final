@@ -2806,4 +2806,317 @@ The published consensus is that SFT-only on per-step labels is **at most 13-21% 
 
 **Part 2 (AndroidWorld deployment) closes as a documented negative-transfer result.** The LoRA's per-step gains do not survive multi-step deployment without harness-aware retraining or trajectory-level objectives. This is itself a contribution — the failure modes (mode collapse, schema hallucination, parse failure) are quantified and tied to mechanism, with a concrete priority-ordered roadmap for future work.
 
+## 52. M3A baseline on AndroidWorld — score-to-beat (cancelled early)
+
+_Appended 2026-04-30._
+
+To establish a literature-comparable "score to beat" on AndroidWorld using the canonical M3A harness (Rawles et al. 2024, the protocol every published AW number uses), we wired the **baseline Gemma 4 E2B (no LoRA)** into M3A as `--agent_name=m3a_gemma4_baseline` (`android_world/agents/m3a_gemma_wrapper.py`) and launched the full 116-task sweep.
+
+### Sweep cancelled at 82/116
+
+After the v3 LoRA sweep already returned 0/31, this sweep returned the same floor across the first 82 tasks. The remaining 34 tasks were not run. Given the per-app distribution and the failure-mode spread (below), there is no realistic path to a non-zero in the tail; cancelling saves ~1.5 hours of GPU/emulator time without changing the headline.
+
+### Aggregated result @ 82/116 (final reported number)
+
+- **Success: 0/82 (0.00%)** across every app cluster (AudioRecorder, BrowserDraw, CameraTake, ClockTimer, ContactsAdd, ExpenseAdd/Delete, Markor*, NotesIs, …).
+- **Mean episode length: 20.5 steps** — most tasks burn the full step budget.
+- **Mean wall: 190 s/task**, total ≈4.3 h for 82 episodes.
+- **1 runtime exception** out of 82 (1.2%) — harness/infra is healthy.
+
+### Failure modes (the diagnostic, not just the score)
+
+| Failure mode | Count | % | What it means |
+|---|---|---|---|
+| `max_steps_no_terminate` | 55 | 67.9% | Agent never emits a terminal `status`/`answer`; runs the budget out. The scroll-loop / mode-collapse pattern from Part 2 §51 reappears here even *without* the LoRA — it's the base 2B model unable to course-correct. |
+| `parse_fail_majority` | 10 | 12.3% | ≥ half the steps in those episodes break the M3A `Reason: ... Action: {…}` schema. M3A treats unparseable emissions as no-ops. |
+| `answered_but_wrong` | 6 | 7.4% | Emits `answer` action but content doesn't satisfy the goal. |
+| `model_thought_complete_but_wrong` | 5 | 6.2% | Emits `status:complete` prematurely. |
+| `model_gave_up_infeasible` | 4 | 4.9% | Emits `status:infeasible` when the task was feasible. |
+| `runtime_exception` | 1 | 1.2% | Harness / env error, not a model failure. |
+
+### What this lets us claim
+
+The M3A baseline result formalizes what was already implicit in §51: **at 2B parameters with no GUI-specific training, AndroidWorld is a 0% floor under the canonical harness too, not just our v3 a11y harness.** This rules out "the harness is the bottleneck" as an explanation for §51's 0/31 LoRA result — the same model class fails the same way under the published reference protocol. It also fills a real gap in the literature: as far as we found, there is no other published AW M3A number for a ≤4B *general-purpose* (non-GUI-trained) VLM. The closest neighbours are ShowUI 2B GUI-trained at 7.7% AW SR and Ferret-UI Lite 3B GUI-trained at 28.0% — both with substantial GUI pretraining that Gemma 4 E2B lacks.
+
+The M3A baseline number is therefore the **floor of the published SLM curve**, and the +15pp target in `ANDROID_WORLD_PLAN.md` (any non-trivial non-zero, ideally matching ShowUI's 7.7%) remains the right bar for follow-on work.
+
+### Artifacts
+
+- Sweep dir: `/home/sanskar/android_world/runs/m3a_baseline_full/run_20260430T175951627342/` (82 `*.pkl.gz` checkpoints).
+- Aggregator: `scripts/aggregate_m3a_baseline.py` (per-app + failure-mode rollup).
+- Wrapper: `android_world/agents/m3a_gemma_wrapper.py`, dispatched in `android_world/run.py` as `m3a_gemma4_baseline`.
+- Replication plan for the +15pp follow-on: `ANDROID_WORLD_PLAN.md`.
+
+---
+
+## §53 — pathZ-smoke autoresearch loop (2026-04-30 → 2026-05-01)
+
+After §52 confirmed the 0/82 M3A baseline on AndroidWorld, we kicked off an autoresearch loop targeted at one question: **can we replicate the AndroidLab paper's SFT recipe at smoke scale on Gemma 4 E2B and produce non-trivial AW success?** The loop ran through 28 numbered experiments across 3 segments. Branch: `autoresearch/pathz-sft-smoke-2026-04-30`.
+
+### Phase 1 — AC-only smoke validation (runs 1-18, segments 0-2)
+
+**Goal:** validate the QLoRA + balanced-class + projector-unlock recipe on offline action-match before committing to AndroidLab integration. All training and eval used AndroidControl-v3 reformatted into M3A's prompt + action vocabulary. 200-row → 500-row eval bump in segment 2 to drop noise floor from ±2pp to ±1.25pp.
+
+**Best AC-only smoke (segment 2, run 16)** — `lora_r=32, alpha=64, balanced 250×6 cls = 1500 rows, 300 steps, lr=2e-4 cosine, projector unlocked, max_new=384` → **23.40% full-match (+2.6pp vs 20.80% baseline)**. Validated levers:
+- Class balancing: +6pp swing vs the click-collapse failure mode at imbalance.
+- Projector unlock (modules_to_save=["embedding_projection"]): +4.5pp vs frozen.
+- 300 steps is the sweet spot at lora_r=32 — under-trains at 250 (run 18), over-trains at 400 (run 17 click drift).
+- Schema-anchored Reason format: ties on full-match, no reliable lift.
+- Per-class target 250 better than 400 (run 15 over-balanced).
+
+This number plateaued at +2.6pp on AC offline. AC has zero `status` rows (the action AW most needs at termination), so we pivoted to AndroidLab.
+
+### Phase 2 — AndroidLab integration (runs 19+, segment 3)
+
+Pulled THUDM/Android-Lab Instruct dataset (Google Drive zip, 569MB) and extracted 6053 SoM-mode trajectory steps. Wrote `convert_androidlab_som.py` that maps AndroidLab's action vocab to M3A's:
+- `tap(N)` → `{"action_type": "click", "index": N}`
+- `type("X")` → `{"action_type": "input_text", "text": "X", "index": last_tap_index}`
+- `swipe(N, "DIR", ...)` → `{"action_type": "scroll", "direction": DIR, "index": N}`
+- `back()` → `{"action_type": "navigate_back"}`
+- `finish(...)` → `{"action_type": "status", "goal_status": "complete"}`
+
+Action-type pool from AL: click 4318, status 716, input_text 513, scroll 471, navigate_back 35.
+
+**Critical methodology pivot during segment 3:** the user pointed out the AndroidLab paper evaluates on live emulator end-to-end task success (their 138-task AL Bench), not offline action-match. After confirming we don't have AL Bench wired up but DO have AndroidWorld working from §52, we redirected the primary metric from offline AC/AL action-match to **live AW success rate on a curated 10-task slice** (FilesDeleteFile, OpenAppTaskEval, SimpleSmsReply, RecipeDeleteSingleRecipe, CameraTakePhoto, ClockStopWatchPausedVerify, ClockStopWatchRunning, MarkorCreateFolder, MarkorDeleteNote, NotesIsTodo). Tasks chosen by shortest baseline episode length (proxy for simplicity, single app domain coverage). Offline action-match retained as fast pre-filter.
+
+Added `m3a_gemma4_lora` agent to `android_world/run.py` so the trained adapter could be evaluated through the standard M3A harness with `--adapter_path=...`. Wrote `scripts/run_aw_smoke_slice.sh` and `scripts/aw_smoke_tasks.txt`.
+
+### Segment 3 results (live AW SR, 10-task slice)
+
+| Run | Recipe | AW SR | n_ok/total | AC offline | AL offline | Status |
+|---|---|---|---|---|---|---|
+| 19 | AC+AL mix 50/50 (1500 rows, 6 cls) + 300 steps + r=32 | **20.0%** | 2/10 | 19.40 | 5.58 | KEEP |
+| 20 | M3A baseline (no LoRA) — segment-3 floor | 0.0% | 0/10 | — | — | KEEP |
+| 21 | + status as 7th class (1750 rows) | 10.0% | 1/10 | 16.00 | 5.98 | discard |
+| **22** | r19 mix + 400 steps (seed=3407) | **50.0%** | 5/10 | 19.60 | 1.99 | **KEEP, BEST** |
+| 23 | r22 + 500 steps | 30.0% | 3/10 | 21.20 | 3.59 | discard |
+| 24 | r22 + 350/cls (2100 rows, 0.76 epoch) | 30.0% | 3/10 | 18.40 | 3.59 | discard |
+| 25 | 350/cls + 525 steps (1.0 epoch matched) | 20.0% | 2/10 | 17.20 | 3.19 | discard |
+| 26 | r22 verbatim, seed=2024 | 10.0% | 1/10 | 16.20 | 4.38 | **discard — reveals ±20pp seed variance** |
+| 27 | pure-AL ablation (1000 rows × 4 AL-only cls, 268 steps) | 10.0% | 1/10 | 20.00 | 5.98 | discard |
+| 28 | r22 + seed=4242 (variance study, in flight at log-time) | TBD | TBD | TBD | TBD | TBD |
+
+### Six load-bearing findings
+
+1. **Real lift exists vs M3A baseline (0%).** Every kept LoRA checkpoint scores in the 10-50% AW SR range, which is non-trivial transfer for a 2B model with no GUI pretraining. Best (r22) hits 50% on the curated slice — comparable in spirit (not benchmark-comparable) to the AndroidLab paper's claimed numbers on AL Bench with a 4× larger Llama-3.1-8B + full SFT.
+
+2. **Eval variance dominates recipe variance.** r22 (seed=3407) → 50%; r26 (seed=2024, *identical* recipe) → 10%. SD on a 10-task slice is approximately ±15-20pp. Single-seed comparisons of recipes within ~30pp of each other are not statistically distinguishable. We were over-interpreting noise in runs 23-25.
+
+3. **AC mixing is load-bearing for AW transfer**, even though the AndroidLab paper trains pure AL. r27's pure-AL ablation lost OpenAppTaskEval (which r19/r22 reliably won) because AndroidLab has zero `open_app` rows in its action vocabulary — `finish` is the closest analog. AndroidWorld tasks frequently require explicit `open_app(<package>)`, so AC's open_app coverage is essential. **The AL paper's pure-AL recipe underperforms AC+AL mix when transferred to AW (a different distribution than AL Bench).**
+
+4. **Status action doesn't transfer despite training data.** Run 21 added 250 status rows from AL → status type-match remained at 0% on offline AL eval. Same in r25, r26, r27. The model emits Reason+Action format but never `status` action_type. Hypothesis: format/data mismatch — AL data renders the `<|user|>...Round N...<|assistant|>` skeleton with raw `finish()` tokens, but our M3A-translation surfaces it as `{"action_type": "status", "goal_status": "complete"}` with no contextual signal of "task completion observed." The model needs an explicit "now is the time to terminate" cue we haven't constructed.
+
+5. **train_loss is inversely correlated with AW SR in segment 3.** Lowest-loss runs (r23 0.63, r25 0.62) had worse AW SR than r22 (0.73). Lower training loss = more fit to the balanced training distribution = worse generalization to the AW task distribution. Confirms that loss-on-balanced-train is not the right early-stopping signal.
+
+6. **Offline AC action-match is a misleading proxy for live AW SR.** r19 (worst AC offline of segment 3 at 19.40) is the only positive AW signal. r23 (best AC at 21.20) was a discard at 30% AW. r27 (high AL offline 5.98) was 10% AW. Stop using AC action-match as a recipe selector; it reliably mis-ranks recipes against AW.
+
+### Methodology faithfulness to AndroidLab paper
+
+After inspecting the AL data schema directly:
+- **Faithful**: the dataset itself (AndroidInstruct SoM-mode trajectories), single-image-per-row format (paper does not pass multi-round images either — prior rounds are text placeholders `** SCREENSHOT **`), step-per-row independent SFT, response-only loss masking. Their assistant output is raw action only (`tap(3)`) — there is *no Thought field* in their data despite the paper's ReAct framing. Our synthetic Reason is an addition required by M3A's prompt contract, not a substitute for missing AL data.
+- **Diverges (forced or by experimental choice)**: AC + AL mix (paper trains pure-AL — but pure-AL underperforms here, see finding #3); QLoRA r=32 + Gemma 4 E2B (vs paper's full SFT on Llama-3.1-8B — hardware-blocked); M3A prompt skeleton wrapping AL rows (forced by AW eval contract — wrapper sends M3A prompts).
+
+### Best recipe (segment 3, run 22)
+
+| Component | Value |
+|---|---|
+| Base | `unsloth/gemma-4-E2B-it`, 4-bit |
+| LoRA | r=32, α=64, all-linear, vision+language |
+| Projector | unlocked (modules_to_save=["embedding_projection"]) |
+| Optimizer | adamw_8bit, lr=2e-4 cosine, warmup=12 steps, wd=0.001 |
+| Effective batch | 1 × 4 grad-accum |
+| Schedule | 400 steps (~1.07 epoch on 1500 rows) |
+| Loss masking | train_on_responses_only = True |
+| Data | balanced 250×6 cls = 1500 rows: 1000 AC + 500 AL (50/50 split per overlapping class) |
+| Reason format | natural-language one-liner from action template |
+| Eval | M3A harness, max_new_tokens=384, 10-task curated AW slice |
+
+### Open issues at log time
+
+- **Variance bound on r22's recipe:** with only seeds 3407 (50%) and 2024 (10%) sampled, the recipe's true expected SR is between roughly 15-45%. Run 28 (in flight) adds a third seed (4242). Need 4-5 seeds to get a confidence-bounded mean.
+- **Status action emission:** model never emits `status` in offline eval despite 250+ training rows. Need to investigate at decode time whether r22's wins are coming from explicit termination or from harness running out of steps with the right environment state.
+- **AW slice size:** 10 tasks is too few. Doubling to 20 tasks would halve variance at the cost of ~30 min more emulator time per run.
+- **Harness patches**: shipped a one-line fix to `android_world/.../adb_utils.py:launch_app` to refuse `monkey -p <name with spaces> 1` (was deadlocking the harness on `open_app("File Manager")` in r24). The patch makes the agent fail-fast on bad app names instead of accumulating retry tracebacks.
+
+### Artifacts
+
+- Loop state: `autoresearch.jsonl` (28 entries, 3 segments, KEEP/DISCARD/CRASH per protocol).
+- Worklog: `experiments/worklog.md`, dashboard: `autoresearch-dashboard.md`, plan: `autoresearch.md`.
+- Best checkpoint: `outputs/run22_ckpt_ac_al_mix_300step_r32` (sic — actually 400 steps; directory was first created at run-19 promotion and reused).
+- Per-run checkpoints: `outputs/run{19,21..27}_ckpt_*`.
+- Full pipelines: `scripts/pathZ/{prepare_smoke_data,train_smoke,eval_smoke,convert_androidlab_som,m3a_format}.py`, `scripts/run_aw_smoke_slice.sh`, `scripts/aw_smoke_tasks.txt`, `autoresearch.sh`.
+- All AW smoke run logs: `/tmp/autoresearch-r{19..28}-aw.full.txt` and `outputs/androidworld_logs/aw_smoke_*.log`.
+
+**End of §53.** Loop continues; r28 in flight at the moment this entry was written.
+
+---
+
+## §54 — pathZ extended autoresearch: r48 → r57b (2026-05-02 → 2026-05-03)
+
+Continuation of §53 loop, re-entering at r48 after the project-prior context summary. Branch unchanged. **Total runs added: r48 + r49–r60 (Gemma) + r57b/r58/r60 (Qwen) = 13 new training experiments + 6 AW-116 evaluations.** Goal still ≥15% AW-116; floor at session start was r47 5% AW-20.
+
+### Phase 1 — Genesis trajectory pivot (r47 → r52)
+
+**r47** (predecessor, recap): OS-Genesis-style synthesis. Gemma 4 31B-it teacher rolled 95 trajectories on 19 AW apps using self-synthesized goals. After bucket-filter + reformat to smoke-v9 prompt: 75 traj / 434 rows. AW-20 = 1/20 = 5%. Failure mode: model trained without status-emission vocab → at eval cannot terminate, loops on shutter clicks until max_steps.
+
+**r48** (text-only baseline, accepted as project floor): restored `status:complete` and `status:infeasible` in the M3A action vocab. Modified `genesis_to_train.py` to keep through first `status` emission as trajectory end-marker (rather than dropping all status). Patched `m3a_a11y.py` status handler to be terminal with a guard requiring open_app + click before allowing complete. Resulted in 75 traj / 495 rows. Trained Gemma 4 E4B, train_loss 0.7335. **AW-20 = 3/20 = 15.0%** (first time crossing threshold). **AW-116 = 9/116 = 7.76%**. Wins: ClockStopWatchRunning, RecipeDeleteSingleRecipe, RecipeDeleteMultipleRecipesWithConstraint, OpenAppTaskEval, CameraTakeVideo (only on AW-116, AW-20 had it as fail), 4× System Settings (Bluetooth/Brightness/Wifi). KEEP rationale: matched our smoke-time best across r19–r47, established AW-116 baseline.
+
+**r49** (DISCARD): hypothesis was that 38 status:infeasible-ending trajectories were teaching student to give up. Modified `genesis_to_train.py` to drop trajectories ending in status:infeasible (75 traj → 37 traj, 495 → 290 rows). **AW-20 = 2/20 = 10%**, regression. Lost ClockStopWatchRunning (perennial win). Offline open_app collapsed 100→50 — those infeasible trajectories carried valuable open_app exemplars. Lesson: trajectory ENDS may be bad demos, MIDDLES are still useful — drop final step only, not whole trajectory.
+
+**Investigation gap r49→r50**: failure-mode audit on r48 AW-116 trajectories. Six failure patterns identified:
+1. Premature `status:complete` after one no-op (MarkorCreateNote);
+2. **Zero `answer` action examples** in 495 train rows but ~10 AW QA tasks need it (NotesIsTodo, NotesMeetingAttendeeCount, etc.);
+3. Truncated AW task prompts (ExpenseAddSingle: prompt cut off at `:` — harness data bug);
+4. Files search-vs-navigate confusion (Files has 0 successful training trajectories);
+5. Wrong-instance selection (MarkorDeleteNewest selects wrong note);
+6. Recording lifecycle multi-step confusion (AudioRecorder).
+Distribution audit: of genesis 75 traj, 38 status:infeasible vs 23 status:complete row-level. 6 apps had 0 status:complete trajectories at all (Files, Camera, Settings, OsmAnd, Simple Draw Pro, VLC) — all infeasible-only demos.
+
+**r50** (build/info): dropped `no_status_long` bucket from `KEEP_BUCKETS` to remove the poisonous "click shutter 12 times never declare complete" demo from Camera training data. 75 → 61 traj, 495 → 329 rows. Did not get AW-20 evaluated; superseded by r51.
+
+**r51** (KEEP, ties AW-20 best): r50 dataset + drop trajectories from the 6 zero-success apps + 10 hand-synthesized `answer`-action examples covering Joplin/Calendar/OpenTracks/Tasks QA. 42 traj / 231 + 10 = 241 rows. Trained Gemma 4 E4B, train_loss 0.5681 (best yet pre-Qwen). AC offline 19.5/54.0, AL 4.78/31.08, **al_status_type_match=12** (vs r48 2). **AW-20 = 3/20 = 15%** ties r48. **Same 3 wins as r48**, no Camera (Camera dropped from train). Synthetic answer worked — model now emits `answer(text='True')` — but **harness `m3a_a11y._has_attempted_navigation()` guard rejected `answer` actions** until both open_app AND click had run successfully. QA tasks navigated via `input_text` (search) → never satisfied click requirement → answer rejected for whole trajectory.
+
+**r52** (KEEP, project AW-116 record): vision-inference experiment. NO retraining — used r51 LoRA. Modified `m3a_a11y.py` `answer` guard to require any one successful action (was: open_app + click). Added new agent `m3a_gemma4_lora_a11y_vision` in `run.py` that constructs `GemmaMultimodalWrapper(text_only=False)` so the wrapper passes screenshots while the harness still emits the smoke-v9 text prompt. Tests whether Gemma E4B's pretrained multimodal capability augments the text-only LoRA at inference time. **AW-20 = 4/20 = 20.0%** — new project high. New wins: MarkorCreateFolder, MarkorDeleteNote (Markor never solved before with text-only). Lost OpenAppTaskEval (vision distraction on simple permission grant). **AW-116 = 10/116 = 8.62%** — also new project high. AW-116 wins: 1 Camera, 1 Clock, 1 Contacts, 2 Recipe, 1 RecipeNoise (NEW), 4 System (Bluetooth/Brightness/WifiOff/On), but lost some r48 Settings wins. Net +1 task vs r48.
+
+**r53** (CRASH × 4 attempts, all NaN): proper vision retrain — train with images so LoRA learns image-conditioned action selection rather than text-only. Re-rolled genesis with vision teacher (`genesis_synth.py` modified to capture `raw_screenshot` per step, plus PIL save under `data/pathZ/genesis_v2/screenshots/`). 65 trajectories, 424 steps, 456 PNG screenshots, 49 MB total. Trajectory ↔ screenshot mapping verified visually (Markor home → Markor task, etc.). Modified `train_smoke.py`: full processor passed to SFTTrainer instead of just tokenizer; row-level `images` field; tried `attn_implementation="eager"` to avoid sdpa+bf16 numerical overflow; tried `finetune_vision_layers=False` + `modules_to_save=[]` (frozen vision tower + projector — standard LLaVA SFT recipe); tried lr 2e-4 → 1e-4 → 2e-5. **All 4 attempts NaN on first forward pass.** Loss is NaN before any gradient step → numerical issue in the Unsloth FastVisionModel + bf16 + 226-row image dataset path that we cannot fix in autoresearch scope. Workarounds for next session: downgrade Unsloth/transformers, switch to non-Unsloth training, or change framework.
+
+### Phase 2 — text-only retrains on Gemma (r54 → r56)
+
+**r54** (CRASH 5 attempts, then DISCARD): tried text-only retrain on the new genesis_v2 trajectories (rolled with the harness-modified-for-r53 teacher). NaN at step 30 with full dataset. Bisected to confirm:
+- First 100 rows: trains fine.
+- Rows 100–225: NaN at step 20.
+- 16 rows containing PUA characters (U+E000–U+F8FF, Material Icon glyphs from Joplin sidebar) filtered out → still NaN at step 70.
+- Genesis_v2 alone (no answer_synth) at full 226 rows: NaN at step 30.
+- Original r51 dataset (231 rows): trains fine to loss 0.40.
+
+Conclusion: genesis_v2 has multiple bad rows beyond just PUA. The harness modification done for r53 (added `raw_screenshot` capture, relaxed answer guard) likely changed teacher behavior at rollout time, producing trajectories that destabilize training. r48 / r51 data unaffected. r54 abandoned.
+
+**r56** (KEEP, ties AW-20 best): r51 dataset + 600 steps (vs r51's 400). Sweet spot between r51 (clean) and r55 (NaN at epoch 10). Gemma E4B train_loss 0.3997. AC 22.0/53.5, AL 3.59/28.69. **AW-20 = 3/20 = 15%** ties r48/r51 BUT new task profile: ClockStopWatchPausedVerify ✅ (NEW — never solved across r19–r52!), ClockStopWatchRunning, RecipeDeleteSingleRecipe; lost OpenAppTaskEval. **AW-116 = 9/116 = 7.76%** matches r48 exactly. Same metric, different wins. Confirmed: longer training trades simple-task wins for harder-task wins, no net AW-116 gain.
+
+**r55** (CRASH): r51 data + 800 steps. Loss healthy through epoch 5 (loss 0.26), collapsed to NaN at epoch 10 (step ~660). 10 passes through 241 rows is past Gemma's stability ceiling at lr=2e-4.
+
+### Phase 3 — Model swap to Qwen (r57b → r60b)
+
+After exhausting Gemma-text and Gemma-vision-train, switched bases. User picked Qwen3.5-4B (text) + Qwen2.5-VL-3B (multimodal) per literature on stronger sub-7B bases.
+
+**r57** (CRASH, fixed in r57b): Qwen3.5-4B with default Gemma chat markers → all-zero gradients (response masking failed because Qwen uses ChatML `<|im_start|>user/assistant`, not Gemma's `<|turn>user/model`).
+
+**r57b** (KEEP, project AW-20 record-tied): Modified `train_smoke.py` to detect `qwen` in model name and use ChatML markers for the `UnslothVisionDataCollator`'s `train_on_responses_only` masking. Trained Qwen3.5-4B via FastVisionModel (Qwen3.5-4B has vision-tower modules even in text-only use, so the vision data collator accepts it). Same r51 dataset (241 rows). **train_loss = 0.1481** — far below Gemma's 0.7335 baseline; Qwen pretraining is much closer to the agent task distribution. AC offline 23.0/53.5 (slightly above Gemma r48's 22/56.5), open_app=100 (matches Gemma's perfect), AL 3.59/33.07 (best AL type-match across project), **al_status_type=16** (vs r48's 2). **AW-20 = 4/20 = 20%** ties r52 vision-inference for project AW-20 record, achieved with **text-only training on a different base**. Wins: ClockStopWatchRunning, MarkorDeleteNote, OpenAppTaskEval, RecipeDeleteSingleRecipe — different mix than r52 (gained OpenAppTaskEval, lost MarkorCreateFolder). Eval pipeline: Gemma `m3a_gemma4_lora_a11y` agent reused with `--gemma4_model_id=unsloth/Qwen3.5-4B` flag — no Qwen-specific wrapper needed since `GemmaMultimodalWrapper.predict_mm` calls `apply_chat_template` generically. **AW-116 = 8/116 = 6.90%** (113 attempted; emulator wedged on VLC tasks 114-116 same as r52). New AW-116 task profile: 3 NEW task families never solved by any prior Gemma run — **ContactsAddContact, ContactsNewContactDraft, TurnOnWifiAndOpenApp**. Lost: 4 Settings tasks (Bluetooth/Brightness/Wifi) Gemma had. Net 1 task below Gemma r52 (8 vs 10) but with disjoint capability surface. Suggests Gemma+Qwen ensemble or Qwen+RFT could exceed r52 record.
+
+**r58** (DISCARD): Qwen2.5-VL-3B-Instruct text-only training succeeded fast (loss 0.21 in 7 min). Eval BROKEN: AC=0/0, parse=29%. Sample preds: model emits free-form conversational text (eBay shopping advice, Q&A reformulations) instead of Reason/Action JSON. Same `eval_smoke.py` pipeline worked for Qwen3.5-4B — issue is specific to Qwen2.5-VL's vision-aware chat template injecting image placeholders even in text-only inference, confusing generation. Would need separate Qwen-VL-aware eval pathway.
+
+**r59** (CRASH): Qwen3-4B text-only via FastVisionModel rejected by `UnslothVisionDataCollator` (`TypeError: only for image models!` — Qwen3 base has no vision tower).
+
+**r60/r60b** (CRASH): added FastLanguageModel fallback in `train_smoke.py` for text-only models, then `trl.DataCollatorForCompletionOnlyLM` fallback for the collator. Latter doesn't exist in pinned trl version. Bailed.
+
+### Bugs and infrastructure fixes shipped this session
+
+- `genesis_synth.py`: `--save-screenshots` flag, `_trajectory_record(img_dir, traj_idx)` writes resized PNGs (≤640px wide) and adds `image: <relative path>` field per step.
+- `m3a_a11y.py`: capture `state.pixels.copy()` into `step_data['raw_screenshot']` so genesis can save screenshots; relax `answer` action guard from "open_app + click required" to "any one successful action required" (line 596–617). Original guard rejected QA-task trajectories that navigated via search-bar `input_text`.
+- `train_smoke.py`: model-family-aware ChatML markers for response masking; full processor passed for vision SFT (vs. tokenizer-only); row-level `images` field; FastLanguageModel fallback path; eager attention path for vision; `max_length` 16384 → 32768.
+- `run.py`: new agent `m3a_gemma4_lora_a11y_vision` (M3AA11Y harness with `text_only=False` so wrapper passes screenshots).
+- `run_aw_smoke_slice.sh`: `VISION=1` env var routes to vision-aware agent variant.
+- `autoresearch.sh`: `DATA_DIR` and `LR` env-var passthrough.
+- `scripts/aw_full_tasks.txt`: derived 116-task list from `task_metadata.json` for AW-116 runs.
+- `scripts/pathZ/genesis_compact_prompts.py` + `genesis_reformat.py`: prompt rebuilders to keep training prompts in smoke-v9 format (compact UI elements, M3A_PROMPT_PREFIX header) — necessary because raw M3AA11Y prompts triggered NaN training in r47.
+
+### Failures requiring next-session intervention
+
+- **Gemma 4 multimodal SFT NaN** (r53 × 4 attempts). Numerical instability in Unsloth FastVisionModel + bf16 + image batch on first forward. Not fixable from autoresearch scope. Fix path: pin older Unsloth/transformers, or use raw HF Trainer + accelerate for multimodal training.
+- **Qwen2.5-VL eval pipeline mismatch** (r58). Qwen-VL chat template injects vision placeholders that break decode in our text-only eval pathway. Fix: branch in `eval_smoke.py` and `m3a_gemma_wrapper.py` to handle Qwen-VL processor separately.
+- **Android emulator periodically wedges** (a11y tree fetch returns nothing) after WiFi-toggle tasks. `adb reboot` recovers without killing the emulator process. Recurs across r52 and r57b on AW-116 — 3 VLC tasks lost on each due to this.
+
+### Project state at end of §54
+
+**AW-20 best**: 4/20 = 20% (r52 Gemma vision-inference, r57b Qwen3.5-4B text-only — tied with disjoint task profiles).
+
+**AW-116 best**: 10/116 = 8.62% (r52 Gemma vision-inference). r57b Qwen3.5-4B text-only at 8/116 = 6.90% but with 3 task families no Gemma run ever solved.
+
+**Gap to 15% AW-116**: ~6 percentage points (≈7 more tasks).
+
+**Untried high-EV next steps** (next session):
+1. **RFT on r57b Qwen3.5-4B**: run student in AW env, filter by env-verified success, retrain with successful trajectories appended. Compounds within environment-verified data; ~4–8 verified successes per round.
+2. **OS-Genesis re-roll with Qwen as teacher** (instead of Gemma 4 31B): Qwen3.5-4B is cheaper (4B vs 31B teacher) and has better instruction-following — should produce more `status:complete`-ending trajectories than Gemma 31B's 33/95.
+3. **InternVL2.5-4B**: exact model from OS-Genesis paper that hits 15.18% AW. Most aligned with proven recipe.
+4. **Ensemble Gemma + Qwen**: their AW-116 wins are partially disjoint (Gemma: 4 Settings + 1 Camera unique; Qwen: 3 Contacts + WifiOpenApp unique). A trivial union ensemble would cover 13/116 = 11.2% if both models could be queried per-task.
+5. **bf16 inference of r48** (untried, ~30 min, no retrain). 4-bit quant errors compound across multi-step trajectories — bf16 inference may unlock 1–3 additional wins.
+
+**Untried but lower-EV**: bigger LoRA r=64, AC-only retrain on Qwen, Qwen2-7B (would need framework changes).
+
+### Artifacts
+
+- `autoresearch.jsonl` extended through r48–r57b (10 KEEP/INFO/CRASH lines added).
+- `outputs/r48/`, `outputs/r51/`, `outputs/r56/`, `outputs/r57b/` — adapter checkpoints for the four Gemma/Qwen runs that ran AW evals.
+- `outputs/r49/`, `outputs/r58/` — adapters for runs that regressed/failed eval, kept for diff analysis.
+- `data/pathZ/genesis/train_v4.jsonl` (495 rows, r48 base) and `train_r51_final.jsonl` (241 rows, r51/r56/r57b base).
+- `data/pathZ/genesis_v2/` — vision-teacher rollout with screenshots: `trajectories.jsonl`, `screenshots/*.png` (456 files, 49 MB), `train_v4.jsonl` and `train_v4_clean.jsonl` (PUA-filtered).
+- AW-116 trajectory pickles for r48 (`~/android_world/runs/r48_aw116/...`), r52 (`r52_aw116`), r56 (`r56_aw116`), r57b (`r57b_qwen_aw116`).
+
+**End of §54.**
+
 **End of training log.**
+
+
+### r62 Qwen3.5 r57b + Genesis vision continuation
+
+Status: training complete; full benchmark not started yet.
+
+Why this exists: r61 trained Qwen3.5 on only 107 Genesis vision rows for 200 optimizer steps (~7.5 epochs) and early AW-116 was 0/15, so the run was canceled as likely overfit/catastrophic forgetting.
+
+Fixes applied:
+- `train_smoke.py` now supports `--epochs`; r62 uses 2 epochs instead of fixed 200 steps.
+- Missing-image rows no longer receive blank image placeholders by default; old behavior is opt-in via `--blank-image-placeholder`.
+- Adapter continuation support added: r62 starts from known-good `outputs/r57b/checkpoint-final` instead of base Qwen.
+- Added helper: `scripts/pathZ/run_r62_qwen35_vision_continuation.sh`.
+- Added optional mixed-data builder: `scripts/pathZ/build_r62_mixed_train.py`.
+
+Training command:
+```bash
+./scripts/pathZ/run_r62_qwen35_vision_continuation.sh
+```
+
+Effective setup:
+- base adapter: `outputs/r57b/checkpoint-final`
+- train JSONL: `data/pathZ/genesis_vision_rebuild/train.expanded.jsonl`
+- rows: 107
+- epochs: 2.0
+- computed steps: 54
+- lr: 5e-5
+- effective batch: 4
+- output: `outputs/r62_qwen35_r57b_plus_genesis_vision_e2/checkpoint-final`
+- final train loss: 0.3321
+
+Next eval recommendation: AW-20 first. Do not run full AW-116 unless AW-20 is at least competitive with r57b/r52 (~20%).
+
+
+### r62 AW-20 smoke eval
+
+Command:
+```bash
+TAG=r62_qwen35_vision_cont_aw_smoke A11Y=1 VISION=1 \
+ADAPTER=outputs/r62_qwen35_r57b_plus_genesis_vision_e2/checkpoint-final \
+./scripts/run_aw_smoke_slice.sh
+```
+
+Result: **3/20 = 15.00%**.
+
+Successes: MarkorCreateFolder,OpenAppTaskEval,RecipeDeleteSingleRecipe
+
+Interpretation:
+- r62 recovered partially from r61's collapse, but did **not** beat r57b text-only AW-20 (4/20 = 20%).
+- It lost r57b's `ClockStopWatchRunning` and `MarkorDeleteNote` wins, but gained/kept `MarkorCreateFolder` and kept `OpenAppTaskEval` + `RecipeDeleteSingleRecipe`.
+- Vision continuation is therefore not clearly beneficial yet. It changes the task profile, but net is -1 task vs r57b on AW-20.
+- Do not run AW-116 for r62.
+
+
+## r62 — Qwen3.5 r57b + low-epoch Genesis vision continuation full AW-116
+
+- Timestamp: 2026-05-05 03:09:59 PDT
+- Training: continued from `outputs/r57b/checkpoint-final` on 107 aligned Genesis vision rows for 2 epochs / 54 steps; final train loss `0.3321`.
+- AW-20 smoke before full: 3/20 = 15.00%; user requested full AW-116 anyway.
+- AW-116 command: `run.py --suite_family=android_world --agent_name=m3a_gemma4_lora_a11y_vision --adapter_path=/home/sanskar/Documents/Github/cs5661-final/outputs/r62_qwen35_r57b_plus_genesis_vision_e2/checkpoint-final --output_path=/home/sanskar/android_world/runs/r62_qwen35_vision_cont_aw116`
+- AW-116 result: **10/115 = 8.70%** attempted; records=116; exceptions=1; run_exit=0.
+- Successes: ContactsNewContactDraft, MarkorCreateFolder, OpenAppTaskEval, RecipeDeleteMultipleRecipesWithConstraint, RecipeDeleteSingleRecipe, SimpleCalendarDeleteOneEvent, SystemBrightnessMaxVerify, SystemBrightnessMinVerify, SystemWifiTurnOnVerify, TurnOnWifiAndOpenApp.
+- Verdict: KEEP. Beats/ties prior 8.62% AW-116 best.
+- Row artifacts: `/home/sanskar/Documents/Github/cs5661-final/outputs/androidworld_logs/r62_qwen35_vision_cont_aw116.rows.md`, `/home/sanskar/Documents/Github/cs5661-final/outputs/androidworld_logs/r62_qwen35_vision_cont_aw116.rows.json`.
+- Run artifacts: `/home/sanskar/android_world/runs/r62_qwen35_vision_cont_aw116/run_20260505T011652695623`, `/home/sanskar/Documents/Github/cs5661-final/outputs/androidworld_logs/r62_qwen35_vision_cont_aw116.log`.

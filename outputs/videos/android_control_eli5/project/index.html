@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #060807;
+        color: #f5fff8;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 78% 18%, rgba(49, 222, 110, 0.18), transparent 34%),
+          linear-gradient(135deg, #06100b 0%, #101915 54%, #07100c 100%);
+      }
+
+      .scene {
+        position: absolute;
+        inset: 0;
+        padding: 70px 84px 64px;
+        overflow: hidden;
+      }
+
+      .scene::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        opacity: 0.36;
+        background-image:
+          linear-gradient(rgba(74, 255, 130, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(74, 255, 130, 0.08) 1px, transparent 1px);
+        background-size: 64px 64px;
+      }
+
+      .scene > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      .kicker {
+        color: #7cf49d;
+        font-size: 30px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 1320px;
+        margin-top: 14px;
+        font-size: 86px;
+        line-height: 0.98;
+        letter-spacing: 0;
+      }
+
+      h2 {
+        font-size: 56px;
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      p,
+      li {
+        font-size: 33px;
+        line-height: 1.28;
+      }
+
+      .caption {
+        position: absolute;
+        left: 84px;
+        right: 84px;
+        bottom: 54px;
+        min-height: 96px;
+        display: flex;
+        align-items: center;
+        border-left: 8px solid #66ef88;
+        padding: 20px 30px;
+        background: rgba(8, 17, 12, 0.84);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+        font-size: 34px;
+        line-height: 1.24;
+        color: #ecfff1;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 56px;
+        margin-top: 48px;
+      }
+
+      .panel {
+        border: 1px solid rgba(126, 244, 157, 0.26);
+        border-radius: 8px;
+        background: rgba(5, 12, 9, 0.72);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        padding: 34px;
+      }
+
+      .panel h3 {
+        margin-bottom: 20px;
+        color: #aaf7bd;
+        font-size: 36px;
+        line-height: 1.1;
+      }
+
+      .list {
+        display: grid;
+        gap: 18px;
+        list-style: none;
+      }
+
+      .list li {
+        padding-left: 32px;
+        border-left: 5px solid #40dc68;
+      }
+
+      .phone {
+        width: 340px;
+        height: 610px;
+        margin: 0 auto;
+        border: 14px solid #19241e;
+        border-radius: 46px;
+        background: #09120d;
+        box-shadow: 0 36px 90px rgba(0, 0, 0, 0.45);
+        padding: 24px;
+      }
+
+      .phone-top {
+        width: 120px;
+        height: 15px;
+        margin: 0 auto 24px;
+        border-radius: 20px;
+        background: #2a3c30;
+      }
+
+      .app-row {
+        display: grid;
+        grid-template-columns: 58px 1fr;
+        gap: 16px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+
+      .icon {
+        width: 58px;
+        height: 58px;
+        border-radius: 14px;
+        background: #45d96b;
+      }
+
+      .line {
+        height: 20px;
+        border-radius: 20px;
+        background: #26342b;
+      }
+
+      .button {
+        margin-top: 20px;
+        padding: 22px 26px;
+        border-radius: 8px;
+        text-align: center;
+        font-size: 28px;
+        font-weight: 850;
+        background: #6aff8d;
+        color: #07100c;
+      }
+
+      .arrow {
+        display: grid;
+        place-items: center;
+        color: #6aff8d;
+        font-size: 72px;
+        font-weight: 900;
+      }
+
+      .code {
+        padding: 24px 28px;
+        border-radius: 8px;
+        background: #07100c;
+        border: 1px solid rgba(126, 244, 157, 0.28);
+        color: #dfffe6;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 30px;
+        line-height: 1.35;
+        white-space: pre-wrap;
+      }
+
+      .metric-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 24px;
+        align-items: center;
+        margin: 18px 0;
+      }
+
+      .bar {
+        height: 42px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+
+      .fill {
+        height: 100%;
+        border-radius: 8px;
+        background: linear-gradient(90deg, #47e66b, #c6ff6a);
+      }
+
+      .metric-row b {
+        width: 116px;
+        color: #f4fff6;
+        font-size: 32px;
+        text-align: right;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 28px;
+        margin-top: 48px;
+      }
+
+      .card {
+        min-height: 185px;
+        padding: 28px;
+        border: 1px solid rgba(126, 244, 157, 0.24);
+        border-radius: 8px;
+        background: rgba(8, 18, 13, 0.74);
+      }
+
+      .card h3 {
+        color: #8cffaa;
+        font-size: 34px;
+        line-height: 1.1;
+        margin-bottom: 14px;
+      }
+
+      .card p {
+        font-size: 28px;
+      }
+
+      .big-number {
+        color: #75ff97;
+        font-size: 112px;
+        font-weight: 900;
+        line-height: 0.92;
+      }
+
+      .subtle {
+        color: #b9cabe;
+      }
+
+      .table {
+        display: grid;
+        grid-template-columns: 190px 1fr 170px;
+        overflow: hidden;
+        border: 1px solid rgba(126, 244, 157, 0.24);
+        border-radius: 8px;
+        background: rgba(4, 10, 7, 0.74);
+      }
+
+      .cell {
+        padding: 18px 22px;
+        border-bottom: 1px solid rgba(126, 244, 157, 0.14);
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      .head {
+        color: #9cffb4;
+        font-weight: 850;
+        background: rgba(74, 255, 130, 0.08);
+      }
+
+      .tag {
+        display: inline-block;
+        padding: 8px 14px;
+        border-radius: 8px;
+        background: rgba(106, 255, 141, 0.16);
+        color: #95ffad;
+        font-size: 24px;
+        font-weight: 850;
+      }
+
+      .comparison {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 36px;
+      }
+
+      .thin {
+        font-size: 28px;
+      }
+
+      .chart {
+        padding: 34px;
+        border-radius: 8px;
+        border: 1px solid rgba(126, 244, 157, 0.24);
+        background: rgba(5, 12, 9, 0.72);
+      }
+
+      .formula {
+        margin: 30px 0;
+        padding: 24px;
+        border-radius: 8px;
+        background: rgba(106, 255, 141, 0.14);
+        color: #ecfff1;
+        font-size: 44px;
+        font-weight: 900;
+      }
+
+      .foot {
+        position: absolute;
+        top: 70px;
+        right: 84px;
+        color: #86ffa3;
+        font-size: 26px;
+        font-weight: 850;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="420"
+      data-width="1920"
+      data-height="1080"
+    >
+      <audio
+        id="narration-audio"
+        class="clip"
+        data-start="0"
+        data-duration="411.84"
+        data-track-index="0"
+        data-volume="1"
+        src="assets/narration.mp3"
+      ></audio>
+
+      <section id="scene-problem" class="clip scene" data-start="0" data-duration="32" data-track-index="1">
+        <div class="foot">AndroidControl ELI5 explainer</div>
+        <div class="kicker">1. What problem are we solving?</div>
+        <h1>Teaching a small vision-language model to use Android apps.</h1>
+        <div class="layout">
+          <div class="panel">
+            <h3>The agent sees a goal and a phone screen.</h3>
+            <ul class="list">
+              <li>Goal: "Add Alice as a contact."</li>
+              <li>Input: screenshot plus UI state.</li>
+              <li>Output: structured action JSON.</li>
+              <li>Hard part: grounding tiny UI targets, not just writing valid JSON.</li>
+            </ul>
+          </div>
+          <div class="phone">
+            <div class="phone-top"></div>
+            <div class="app-row"><div class="icon"></div><div class="line"></div></div>
+            <div class="app-row"><div class="icon" style="background:#7cf49d"></div><div class="line" style="width:82%"></div></div>
+            <div class="app-row"><div class="icon" style="background:#baff6c"></div><div class="line" style="width:74%"></div></div>
+            <div class="button">Tap "Create contact"</div>
+            <div class="code" style="margin-top:26px;font-size:24px">{"action":"tap",
+"element_id":7}</div>
+          </div>
+        </div>
+        <div class="caption">ELI5 version: we are trying to teach a phone-using robot what to press next, from the same kind of screen a person sees.</div>
+      </section>
+
+      <section id="scene-setup" class="clip scene" data-start="32" data-duration="34" data-track-index="1">
+        <div class="kicker">2. AndroidControl setup</div>
+        <h1>Step-level supervised fine-tuning on AndroidControl.</h1>
+        <div class="cards" style="margin-top:36px">
+          <div class="card"><h3>Data</h3><p>One row is one screen plus one target action. Final a11y-native setup used 73K train rows, 686 validation rows, and 8,217 test rows.</p></div>
+          <div class="card"><h3>Model</h3><p>Gemma 4 E2B with Unsloth QLoRA. About 29.86M trainable parameters, only 0.58% of the base.</p></div>
+          <div class="card"><h3>Hardware</h3><p>Single RTX 4090, 24 GB VRAM. Run A took 19,886 steps, one epoch, and 8 h 41 min.</p></div>
+        </div>
+        <div class="layout" style="grid-template-columns: 0.9fr 1.1fr;">
+          <div class="panel"><div class="big-number">119 MB</div><p class="subtle">final adapter size</p></div>
+          <div class="panel"><h3>Research question</h3><p>Can a 2B-class VLM beat its zero-shot AndroidControl policy, and which task formulation makes the signal learnable?</p></div>
+        </div>
+        <div class="caption">This was a constrained class-project setup: fast iterations, checkpoint sweeps, and representation changes instead of giant pretraining.</div>
+      </section>
+
+      <section id="scene-loss-eval" class="clip scene" data-start="66" data-duration="36" data-track-index="1">
+        <div class="kicker">3. Why loss looked good but eval got worse</div>
+        <h1>The dashboard said "great." The held-out eval said "nope."</h1>
+        <div class="layout">
+          <div class="chart">
+            <h3>Run A cross-entropy loss</h3>
+            <div class="metric-row"><span class="thin">start</span><div class="bar"><div class="fill" style="width:100%"></div></div><b>10.24</b></div>
+            <div class="metric-row"><span class="thin">mid</span><div class="bar"><div class="fill" style="width:26%"></div></div><b>2.7</b></div>
+            <div class="metric-row"><span class="thin">end</span><div class="bar"><div class="fill" style="width:4%"></div></div><b>0.42</b></div>
+            <p class="subtle" style="margin-top:28px">No NaNs. Stable grad norms. Textbook-looking curve.</p>
+          </div>
+          <div class="panel">
+            <h3>But full-match regressed</h3>
+            <div class="big-number">0.288 → 0.232</div>
+            <p>Loss was averaged over image patches, prompt tokens, and JSON tokens. The easy tokens hid the action quality.</p>
+          </div>
+        </div>
+        <div class="caption">Analogy: getting a high grade for neat handwriting does not mean the answer to the math problem is correct.</div>
+      </section>
+
+      <section id="scene-coordinate-failure" class="clip scene" data-start="102" data-duration="35" data-track-index="1">
+        <div class="kicker">4. Why coordinate prediction failed</div>
+        <h1>Coordinates looked universal, but the loss did not understand space.</h1>
+        <div class="layout">
+          <div class="panel">
+            <h3>Original target</h3>
+            <div class="code">{"action":"tap",
+"x":0.293,
+"y":0.934}</div>
+            <ul class="list" style="margin-top:28px">
+              <li>Token CE rewards digit strings.</li>
+              <li>It does not reward "near the right button."</li>
+              <li>Small buttons shrink after vision downsampling.</li>
+            </ul>
+          </div>
+          <div class="phone">
+            <div class="phone-top"></div>
+            <div class="line" style="width:90%;margin:20px 0 44px"></div>
+            <div class="button" style="background:#26342b;color:#dfffe6">Cancel</div>
+            <div class="button">Send</div>
+            <div style="position:absolute;margin-left:142px;margin-top:-60px;width:36px;height:36px;border-radius:50%;background:#ff5f70;border:5px solid #fff"></div>
+            <div style="position:absolute;margin-left:92px;margin-top:86px;width:36px;height:36px;border-radius:50%;background:#6aff8d;border:5px solid #07100c"></div>
+          </div>
+        </div>
+        <div class="caption">The model learned plausible screen spots, like center or top-left, instead of reliably grounding the actual UI element.</div>
+      </section>
+
+      <section id="scene-element-pivot" class="clip scene" data-start="137" data-duration="34" data-track-index="1">
+        <div class="kicker">5. Pivot to accessibility element IDs</div>
+        <h1>Instead of exact pixels, give the robot a menu of buttons.</h1>
+        <div class="comparison" style="margin-top:48px">
+          <div class="panel">
+            <h3>Set-of-Marks path</h3>
+            <p>Overlay numbered marks on interactable elements. Conceptually nice, but zero-shot was only 0.130 for this 2B VLM.</p>
+          </div>
+          <div class="panel">
+            <h3>Accessibility-native path</h3>
+            <div class="code">[7] Button "Send" bbox=(...)
+[8] TextField "Name" bbox=(...)
+
+{"action":"tap",
+ "element_id":7}</div>
+          </div>
+        </div>
+        <div class="cards">
+          <div class="card"><h3>Before</h3><p>Predict coordinates from pixels.</p></div>
+          <div class="card"><h3>After</h3><p>Select from UI nodes already known to Android.</p></div>
+          <div class="card"><h3>Zero-shot</h3><p>Element accuracy started at 0.3935.</p></div>
+        </div>
+        <div class="caption">This was the main insight: mobile control works better as structured action selection over UI state than as raw coordinate regression.</div>
+      </section>
+
+      <section id="scene-metric-pivot" class="clip scene" data-start="171" data-duration="34" data-track-index="1">
+        <div class="kicker">6. Metric pivot to element accuracy</div>
+        <h1>The metric had to match the action we actually execute.</h1>
+        <div class="comparison" style="margin-top:48px">
+          <div class="panel">
+            <h3>Legacy tap-radius</h3>
+            <ul class="list">
+              <li>Correct if near the ground-truth point.</li>
+              <li>Useful for coordinate-era comparison.</li>
+              <li>Can forgive the wrong nearby element.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Element accuracy</h3>
+            <ul class="list">
+              <li>Correct only if element_id matches.</li>
+              <li>Matches production behavior.</li>
+              <li>Made the learning curve meaningful again.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="caption">If two buttons sit side by side, being close is not enough. The wrong button still fires the wrong handler.</div>
+      </section>
+
+      <section id="scene-ablation-chain" class="clip scene" data-start="205" data-duration="38" data-track-index="1">
+        <div class="kicker">7. Run I/J/K/L ablation chain</div>
+        <h1>Each run tested one explanation.</h1>
+        <div class="table" style="margin-top:48px">
+          <div class="cell head">Run</div><div class="cell head">Change</div><div class="cell head">Element acc.</div>
+          <div class="cell">Zero-shot</div><div class="cell">No SFT, accessibility-native prompt</div><div class="cell">0.3935</div>
+          <div class="cell">Run I</div><div class="cell">Path W v1 SFT</div><div class="cell">0.4930</div>
+          <div class="cell">Run J</div><div class="cell">+ Cui class weighting</div><div class="cell">0.4785</div>
+          <div class="cell">Run K</div><div class="cell">+ CAP action schema</div><div class="cell">0.5235</div>
+          <div class="cell">Run L</div><div class="cell">+ one-step prior action history</div><div class="cell">0.5311</div>
+        </div>
+        <div class="caption">The negative result matters too: class weighting was the wrong fix. Schema and history were the useful changes.</div>
+      </section>
+
+      <section id="scene-cap-history" class="clip scene" data-start="243" data-duration="36" data-track-index="1">
+        <div class="kicker">8. CAP schema and history improvements</div>
+        <h1>Run K fixed action structure. Run L fixed part of temporal context.</h1>
+        <div class="layout">
+          <div class="panel">
+            <h3>CAP-style schema</h3>
+            <div class="code">{"action_type":"tap",
+ "action_args":{"element_id":7}}</div>
+            <p style="margin-top:22px">Generate the action type first, then type-specific arguments. Open_app improved by +69.9 points versus Run I.</p>
+          </div>
+          <div class="panel">
+            <h3>One-step history</h3>
+            <div class="code">Previous action:
+{"action_type":"scroll",
+ "action_args":{"direction":"down"}}</div>
+            <p style="margin-top:22px">Scroll accuracy moved from 21.5% to 39.8% by reducing a direction-convention flip.</p>
+          </div>
+        </div>
+        <div class="caption">Small schema choices were not cosmetic. They changed which classes the model could learn cleanly.</div>
+      </section>
+
+      <section id="scene-final-ac" class="clip scene" data-start="279" data-duration="34" data-track-index="1">
+        <div class="kicker">9. Final AndroidControl result</div>
+        <h1>Run L is the AndroidControl headline.</h1>
+        <div class="layout" style="grid-template-columns: 0.85fr 1.15fr">
+          <div class="panel">
+            <div class="big-number">0.5311</div>
+            <p>Full-test element accuracy on 8,217 AndroidControl rows.</p>
+            <p class="subtle" style="margin-top:20px">+13.76 percentage points, +35% relative versus 0.3935 zero-shot.</p>
+          </div>
+          <div class="chart">
+            <h3>Result ladder</h3>
+            <div class="metric-row"><span class="thin">Zero-shot</span><div class="bar"><div class="fill" style="width:39.35%"></div></div><b>39.4%</b></div>
+            <div class="metric-row"><span class="thin">Run I</span><div class="bar"><div class="fill" style="width:49.3%"></div></div><b>49.3%</b></div>
+            <div class="metric-row"><span class="thin">Run K</span><div class="bar"><div class="fill" style="width:52.35%"></div></div><b>52.3%</b></div>
+            <div class="metric-row"><span class="thin">Run L</span><div class="bar"><div class="fill" style="width:53.11%"></div></div><b>53.1%</b></div>
+          </div>
+        </div>
+        <div class="caption">The improvement came from reframing the task, then adding the CAP schema and one-step history.</div>
+      </section>
+
+      <section id="scene-androidworld-transition" class="clip scene" data-start="313" data-duration="36" data-track-index="1">
+        <div class="kicker">10. AndroidWorld transition</div>
+        <h1>Per-step success does not automatically become episode success.</h1>
+        <div class="layout">
+          <div class="panel">
+            <div class="formula">P(success) = p<sup>N</sup></div>
+            <p>If every step is 85% correct, a 15-step episode succeeds only about 8.7% of the time.</p>
+          </div>
+          <div class="panel">
+            <h3>AndroidControl vs AndroidWorld</h3>
+            <ul class="list">
+              <li>AndroidControl: static screenshots, one row equals one step.</li>
+              <li>AndroidWorld: live emulator, 116 tasks, whole-episode success.</li>
+              <li>Distribution shift: new prompt style, rollout errors, terminal decisions.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="caption">This is why the AndroidControl win is real, but live deployment is a separate research problem.</div>
+      </section>
+
+      <section id="scene-aw-result" class="clip scene" data-start="349" data-duration="36" data-track-index="1">
+        <div class="kicker">11. AW result and failure analysis</div>
+        <h1>AndroidWorld lifted off zero, but exposed the gap.</h1>
+        <div class="layout">
+          <div class="panel">
+            <div class="big-number">8.70%</div>
+            <p>r62 Qwen3.5 + Genesis-vision on AW-116: 10 wins out of 115 attempted.</p>
+            <p class="subtle" style="margin-top:20px">Baseline Gemma M3A and Run L LoRA both hit a hard zero in early sweeps.</p>
+          </div>
+          <div class="chart">
+            <h3>Main failure modes</h3>
+            <div class="metric-row"><span class="thin">no terminate</span><div class="bar"><div class="fill" style="width:67.9%"></div></div><b>67.9%</b></div>
+            <div class="metric-row"><span class="thin">parse fail</span><div class="bar"><div class="fill" style="width:12.3%"></div></div><b>12.3%</b></div>
+            <div class="metric-row"><span class="thin">wrong answer</span><div class="bar"><div class="fill" style="width:7.4%"></div></div><b>7.4%</b></div>
+          </div>
+        </div>
+        <div class="caption">The biggest failure was not just tapping wrong. The model often never knew when to stop.</div>
+      </section>
+
+      <section id="scene-future-conclusion" class="clip scene" data-start="385" data-duration="35" data-track-index="1">
+        <div class="kicker">12. Future work and conclusion</div>
+        <h1>Final lesson: element-native control works; multi-step agency needs trajectory training.</h1>
+        <div class="cards">
+          <div class="card"><h3>Trajectory replay</h3><p>Train on complete successful AndroidWorld episodes, not isolated rows.</p></div>
+          <div class="card"><h3>Schema enforcement</h3><p>Use JSON grammar decoding so illegal actions cannot be emitted.</p></div>
+          <div class="card"><h3>ReAct / reflection</h3><p>Match the live harness prompt and add screen-diff memory.</p></div>
+        </div>
+        <div class="layout" style="grid-template-columns: 1fr 1fr; margin-top:34px">
+          <div class="panel"><h3>AndroidControl</h3><div class="big-number">0.5311</div><p>+13.76 pp, +35% relative lift.</p></div>
+          <div class="panel"><h3>AndroidWorld</h3><div class="big-number">8.70%</div><p>Honest progress off a zero baseline, not the ceiling.</p></div>
+        </div>
+        <div class="caption">The project mapped the important gap: use UI elements for per-step grounding, then train and scaffold for whole episodes.</div>
+      </section>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

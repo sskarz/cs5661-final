@@ -1,0 +1,192 @@
+{
+  "episodes": [
+    {
+      "kind": "trained",
+      "label": "Trained r62 AW smoke",
+      "source_pickle": "/home/sanskar/android_world/runs/r62_qwen35_vision_cont_aw_smoke/run_20260504T220820638384/RecipeDeleteSingleRecipe_0.pkl.gz",
+      "episode_name": "RecipeDeleteSingleRecipe_0",
+      "goal": "RecipeDeleteSingleRecipe_0.pkl",
+      "success": null,
+      "frame_count_available": 9,
+      "frames": [
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_00.png",
+          "step_index": 0,
+          "action_label": "JSONAction(action_type='open_app', app_name='Broccoli')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_01.png",
+          "step_index": 3,
+          "action_label": "JSONAction(action_type='click', index=3)",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_02.png",
+          "step_index": 6,
+          "action_label": "JSONAction(action_type='input_text', index=8, text='Thai Peanut Noodle Salad')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_03.png",
+          "step_index": 8,
+          "action_label": "JSONAction(action_type='status', goal_status='complete')",
+          "size": [
+            1080,
+            2400
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "trained",
+      "label": "Trained r62 AW-116",
+      "source_pickle": "/home/sanskar/android_world/runs/r62_qwen35_vision_cont_aw116/run_20260505T011652695623/RecipeDeleteSingleRecipe_0.pkl.gz",
+      "episode_name": "RecipeDeleteSingleRecipe_0",
+      "goal": "RecipeDeleteSingleRecipe_0.pkl",
+      "success": null,
+      "frame_count_available": 9,
+      "frames": [
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_00.png",
+          "step_index": 0,
+          "action_label": "JSONAction(action_type='open_app', app_name='Broccoli')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_01.png",
+          "step_index": 3,
+          "action_label": "JSONAction(action_type='click', index=3)",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_02.png",
+          "step_index": 6,
+          "action_label": "JSONAction(action_type='input_text', index=8, text='Thai Peanut Noodle Salad')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/trained_RecipeDeleteSingleRecipe_0_03.png",
+          "step_index": 8,
+          "action_label": "JSONAction(action_type='status', goal_status='infeasible')",
+          "size": [
+            1080,
+            2400
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "baseline",
+      "label": "Baseline AW smoke",
+      "source_pickle": "/home/sanskar/android_world/runs/aw_smoke_baseline/run_20260501T054858070144/RecipeDeleteSingleRecipe_0.pkl.gz",
+      "episode_name": "RecipeDeleteSingleRecipe_0",
+      "goal": "RecipeDeleteSingleRecipe_0.pkl",
+      "success": null,
+      "frame_count_available": 10,
+      "frames": [
+        {
+          "file": "demo_frames/baseline_RecipeDeleteSingleRecipe_0_00.png",
+          "step_index": 0,
+          "action_label": "JSONAction(action_type='click', index=6)",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/baseline_RecipeDeleteSingleRecipe_0_01.png",
+          "step_index": 3,
+          "action_label": "JSONAction(action_type='open_app', app_name='Broccoli')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/baseline_RecipeDeleteSingleRecipe_0_02.png",
+          "step_index": 6,
+          "action_label": "JSONAction(action_type='scroll', direction='down')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/baseline_RecipeDeleteSingleRecipe_0_03.png",
+          "step_index": 9,
+          "action_label": "JSONAction(action_type='click', index=3)",
+          "size": [
+            1080,
+            2400
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "baseline",
+      "label": "Baseline m3a smoke",
+      "source_pickle": "/home/sanskar/android_world/runs/m3a_baseline_smoke/run_20260430T175629176216/SystemWifiTurnOn_0.pkl.gz",
+      "episode_name": "SystemWifiTurnOn_0",
+      "goal": "SystemWifiTurnOn_0.pkl",
+      "success": null,
+      "frame_count_available": 10,
+      "frames": [
+        {
+          "file": "demo_frames/baseline_SystemWifiTurnOn_0_00.png",
+          "step_index": 0,
+          "action_label": "JSONAction(action_type='scroll', direction='down')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/baseline_SystemWifiTurnOn_0_01.png",
+          "step_index": 3,
+          "action_label": "JSONAction(action_type='scroll', direction='down')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/baseline_SystemWifiTurnOn_0_02.png",
+          "step_index": 6,
+          "action_label": "JSONAction(action_type='scroll', direction='down')",
+          "size": [
+            1080,
+            2400
+          ]
+        },
+        {
+          "file": "demo_frames/baseline_SystemWifiTurnOn_0_03.png",
+          "step_index": 9,
+          "action_label": "JSONAction(action_type='scroll', direction='down')",
+          "size": [
+            1080,
+            2400
+          ]
+        }
+      ]
+    }
+  ]
+}

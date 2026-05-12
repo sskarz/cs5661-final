@@ -1,0 +1,49 @@
+# AndroidControl ELI5 Explainer Narration
+
+## 1. What problem are we solving? 0:00-0:32
+
+This project is about teaching a small vision-language model to use Android apps. The model gets a goal, like "Add Alice as a contact," plus a screenshot and UI state. It must answer with a structured action: tap, type, scroll, open an app, go back, wait, or finish. The hard part is not only writing valid JSON. The hard part is grounding: knowing which tiny thing on the phone screen should be pressed next.
+
+## 2. AndroidControl setup 0:32-1:06
+
+The training setup was intentionally practical. AndroidControl was converted into step-level supervised fine-tuning: one row, one screen, one target action. The final accessibility-native version used about 73 thousand training rows, 686 validation rows, and 8,217 test rows. The model was Gemma 4 E2B, trained with Unsloth QLoRA on a single RTX 4090. That means only about 30 million trainable parameters, a 119 megabyte adapter, and experiments that could be run inside a class-project budget.
+
+## 3. Why loss looked good but eval got worse 1:06-1:42
+
+The first surprise was that the training loss looked beautiful while the evaluation got worse. Run A fell from cross-entropy 10.24 to about 0.42 over one epoch. No NaNs, stable gradients, healthy-looking dashboard. But full-match evaluation dropped from 0.288 to 0.232. The reason was that the loss was averaged over image patch tokens, prompt tokens, and the short action JSON. The easy tokens dominated the headline. ELI5 analogy: neat handwriting did not mean the math answer was right.
+
+## 4. Why coordinate prediction failed 1:42-2:17
+
+The first action format predicted tap coordinates, like x equals 0.293 and y equals 0.934. That seems universal because every tap can be written as a point. But a language model loss rewards digit strings, not physical screen distance. "0.500" and "0.293" are just token sequences, even if they mean very different places. The model learned plausible screen modes, such as center or top-left, instead of consistently pointing at the actual UI element.
+
+## 5. The pivot to accessibility element IDs 2:17-2:51
+
+The turning point was to stop asking for exact pixels. Instead, we gave the model a menu of UI elements from Android's accessibility tree. For example: item 7 is the Send button, item 8 is the Name text field. The answer becomes: tap element_id 7. The analogy is simple: instead of telling a robot the exact pixel coordinate of a button, give it a numbered menu of buttons to choose from. This immediately made the supervision more learnable.
+
+## 6. Metric pivot to element accuracy 2:51-3:25
+
+Changing the target also meant changing the metric. The old tap-radius metric said a prediction was correct if it landed close enough to the ground-truth point. That was useful for coordinate experiments, but it can forgive the wrong nearby button. Element accuracy is stricter: the predicted element_id must equal the ground-truth element_id. That better matches production behavior, because pressing the wrong nearby icon still fires the wrong handler.
+
+## 7. Run I/J/K/L ablation chain 3:25-4:03
+
+The final result came from a controlled ablation chain. Zero-shot accessibility-native prompting started at 0.3935 element accuracy. Run I, the first Path W fine-tune, reached 0.4930. Run J added Cui-style class weighting and dropped to 0.4785, so class weighting was not the fix. Run K changed the output schema to CAP style and reached 0.5235. Run L added one-step action history and reached 0.5311. Each run tested a specific hypothesis.
+
+## 8. CAP schema and history improvements 4:03-4:39
+
+Run K used a hierarchical action schema: first generate the action type, then generate the arguments for that action type. That helped open_app dramatically, because open_app stopped competing directly with dominant tap arguments in one flat distribution. Run L added the previous action to the prompt. That did not solve wait, but it helped scroll direction: scroll accuracy moved from 21.5 percent to 39.8 percent by reducing a systematic down-versus-up flip.
+
+## 9. Final AndroidControl result 4:39-5:13
+
+The AndroidControl headline is Run L: 0.5311 element accuracy on the full 8,217-row test set. That is a 13.76 percentage point absolute lift over the 0.3935 zero-shot baseline, and about a 35 percent relative improvement. The practical recipe is: accessibility-native element selection, CAP-style action schema, and one-step prior-action history. The big lesson is that formulation mattered more than knobs like LoRA rank, longer training, or class weighting.
+
+## 10. AndroidWorld transition and compounding error 5:13-5:49
+
+Then comes the AndroidWorld transition. AndroidControl is one screen, one step, offline grading. AndroidWorld is a live emulator with multi-step tasks and whole-episode success. This creates compounding error. If a task takes N steps and each step succeeds with probability p, then episode success is roughly p to the N. Even 85 percent per-step accuracy becomes only about 8.7 percent over 15 steps. So the per-step win is real, but live deployment is a different problem.
+
+## 11. AW result and failure analysis 5:49-6:25
+
+The best AndroidWorld result shipped in this project was 8.70 percent on AW-116 with the r62 Qwen3.5 plus Genesis-vision recipe: 10 wins out of 115 attempted tasks. That lifted off a hard zero floor, but it also exposed why the AndroidControl model did not transfer directly. The biggest failure mode was maxing out the step budget without terminating. Other failures included parse errors, wrong answers, premature complete claims, and schema hallucinations.
+
+## 12. Future work and conclusion 6:25-7:00
+
+The future work is clear. First, train on full successful AndroidWorld trajectories, not just isolated steps. Second, enforce the JSON schema at decode time so illegal actions cannot be emitted. Third, train in the same ReAct or thought-action format used by the live harness, and add reflection or screen-diff memory. Final takeaway: mobile UI control is solvable with a 2B-class VLM when framed as accessibility-native element selection, but live multi-step agency needs trajectory-level training and harness-aware scaffolding.

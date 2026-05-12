@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Android Control - Hype Trailer</title>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: #F8F9FA;
+    font-family: 'Google Sans', 'Inter', sans-serif;
+    color: #1F1F1F;
+  }
+  .stage { position: absolute; inset: 0; }
+
+  /* === Background === */
+  .bg-base {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 1200px 800px at 18% 20%, rgba(61,220,132,0.10) 0%, transparent 60%),
+      radial-gradient(ellipse 1100px 700px at 85% 80%, rgba(66,133,244,0.08) 0%, transparent 55%),
+      radial-gradient(ellipse 800px 600px at 50% 50%, rgba(251,188,4,0.04) 0%, transparent 50%),
+      linear-gradient(180deg, #FFFFFF 0%, #F1F3F4 100%);
+  }
+  .bg-grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,0,0,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.035) 1px, transparent 1px);
+    background-size: 80px 80px;
+    mask-image: radial-gradient(ellipse at center, black 40%, transparent 85%);
+  }
+  .bg-vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(15,30,50,0.08) 100%);
+    pointer-events: none;
+  }
+  .scanline {
+    position: absolute; left: 0; right: 0;
+    background: linear-gradient(transparent 0%, rgba(61,220,132,0.10) 50%, transparent 100%);
+    height: 280px; opacity: 0.6;
+  }
+
+  /* === Particles === */
+  .particle {
+    position: absolute; border-radius: 50%;
+    background: #3DDC84; opacity: 0;
+    box-shadow: 0 0 10px rgba(61,220,132,0.55);
+  }
+  .particle.blue { background: #4285F4; box-shadow: 0 0 10px rgba(66,133,244,0.55); }
+  .particle.yellow { background: #FBBC04; box-shadow: 0 0 10px rgba(251,188,4,0.55); }
+  .particle.red { background: #EA4335; box-shadow: 0 0 10px rgba(234,67,53,0.45); }
+
+  /* === Letter system === */
+  .letter { display: inline-block; opacity: 0; transform: translateY(20px); will-change: transform, opacity; }
+
+  /* === Phone mockup === */
+  .phone {
+    position: absolute; width: 340px; height: 680px;
+    background: linear-gradient(140deg, #ECEFF1 0%, #CFD8DC 50%, #B0BEC5 100%);
+    border-radius: 46px;
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.06),
+      inset 0 1px 0 rgba(255,255,255,0.6),
+      0 30px 80px rgba(15,30,50,0.18),
+      0 8px 30px rgba(15,30,50,0.10);
+    overflow: hidden;
+  }
+  .phone-screen {
+    position: absolute; top: 14px; left: 14px; right: 14px; bottom: 14px;
+    background: #FFFFFF; border-radius: 32px; overflow: hidden;
+    color: #202124;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+  }
+  .phone-notch {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 116px; height: 30px; background: #1F1F1F;
+    border-radius: 0 0 18px 18px; z-index: 10;
+  }
+  .phone-statusbar {
+    position: absolute; top: 6px; left: 26px; right: 26px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: 'Google Sans', sans-serif;
+    font-size: 11px; font-weight: 600; color: #1F1F1F; z-index: 11;
+  }
+  .phone-glow {
+    position: absolute; inset: -50px; border-radius: 70px;
+    background: radial-gradient(ellipse at center, rgba(61,220,132,0.30) 0%, transparent 70%);
+    z-index: -1; opacity: 0; filter: blur(8px);
+  }
+
+  /* === AI cursor === */
+  .cursor-svg {
+    position: absolute; width: 32px; height: 32px; z-index: 100;
+    filter: drop-shadow(0 4px 14px rgba(61,220,132,0.7));
+  }
+  .cursor-ring {
+    position: absolute; width: 64px; height: 64px;
+    border: 3px solid #3DDC84; border-radius: 50%;
+    opacity: 0; transform: translate(-50%, -50%);
+    box-shadow: 0 0 24px rgba(61,220,132,0.5), inset 0 0 12px rgba(61,220,132,0.3);
+  }
+
+  /* === Bounding box === */
+  .bbox {
+    position: absolute;
+    border: 2.5px solid #3DDC84;
+    border-radius: 14px;
+    box-shadow: 0 0 0 4px rgba(61,220,132,0.18), 0 0 30px rgba(61,220,132,0.45);
+    pointer-events: none;
+    opacity: 0;
+  }
+  .bbox-label {
+    position: absolute; top: -28px; left: -2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 700;
+    color: #fff; background: #3DDC84;
+    padding: 3px 8px; border-radius: 6px 6px 6px 0;
+    letter-spacing: 0.5px;
+    box-shadow: 0 4px 12px rgba(61,220,132,0.45);
+  }
+
+  /* === A11y tree panel === */
+  .a11y-panel {
+    position: absolute;
+    background: #FFFFFF;
+    border-radius: 18px; padding: 22px 24px;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.75;
+    box-shadow:
+      0 1px 0 rgba(0,0,0,0.04),
+      0 12px 40px rgba(15,30,50,0.12),
+      0 0 0 1px rgba(61,220,132,0.18);
+    color: #1F1F1F;
+  }
+  .a11y-header {
+    display: flex; align-items: center; gap: 10px;
+    font-family: 'Google Sans', sans-serif;
+    font-size: 11px; font-weight: 700; color: #137333;
+    margin-bottom: 14px; letter-spacing: 1.8px;
+    text-transform: uppercase;
+  }
+  .a11y-dot {
+    width: 9px; height: 9px; border-radius: 50%; background: #3DDC84;
+    box-shadow: 0 0 10px #3DDC84;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: 0.6; transform: scale(1.3);} }
+
+  .a11y-node { padding: 1px 0; opacity: 0; color: #5F6368; white-space: pre; }
+  .a11y-tag { color: #137333; font-weight: 700; }
+  .a11y-attr { color: #1A73E8; }
+  .a11y-str { color: #C5221F; }
+  .a11y-target {
+    background: rgba(61,220,132,0.18);
+    padding: 2px 6px; border-radius: 5px;
+    box-shadow: 0 0 0 1px rgba(61,220,132,0.5);
+  }
+
+  /* === Phone UI items === */
+  .ui-row {
+    padding: 14px 12px; background: #fff; border-radius: 14px;
+    display: flex; align-items: center; gap: 14px;
+    border: 2px solid transparent;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+  }
+  .ui-icon {
+    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 16px; font-weight: 700;
+  }
+  .ui-label { font-size: 14px; color: #1F1F1F; font-weight: 600; }
+  .ui-sub { font-size: 11px; color: #5F6368; font-weight: 500; margin-top: 2px; }
+  .ui-toggle {
+    width: 46px; height: 26px; background: #DADCE0;
+    border-radius: 13px; margin-left: auto; position: relative;
+  }
+  .ui-toggle::after {
+    content: ''; position: absolute; width: 22px; height: 22px;
+    background: white; border-radius: 50%; top: 2px; left: 2px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.18);
+  }
+  .ui-toggle.on { background: #3DDC84; }
+  .ui-toggle.on::after { left: 22px; }
+
+  /* === Caption === */
+  .caption {
+    position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+    text-align: center; opacity: 0;
+  }
+  .caption-tag {
+    display: inline-block; padding: 7px 16px;
+    background: rgba(61,220,132,0.14); border: 1px solid rgba(61,220,132,0.4);
+    border-radius: 22px; font-size: 12px; font-weight: 700;
+    color: #137333; letter-spacing: 2.5px; margin-bottom: 14px;
+  }
+  .caption-text {
+    font-size: 30px; font-weight: 700; color: #1F1F1F;
+    letter-spacing: -0.8px;
+  }
+
+  /* === Stat cards === */
+  .stat-card {
+    text-align: center;
+    padding: 44px 64px;
+    background: #FFFFFF;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 28px;
+    box-shadow: 0 18px 50px rgba(15,30,50,0.08), 0 1px 0 rgba(0,0,0,0.02);
+  }
+  .stat-num {
+    font-size: 152px; font-weight: 900; line-height: 1;
+    font-feature-settings: 'tnum';
+    letter-spacing: -5px;
+  }
+  .stat-label {
+    font-size: 16px; font-weight: 700;
+    color: #5F6368; margin-top: 14px;
+    letter-spacing: 2.5px;
+  }
+
+  /* === Task tile === */
+  .tile {
+    position: absolute; width: 86px; height: 86px;
+    border-radius: 18px;
+    background: #FFFFFF;
+    border: 1px solid rgba(0,0,0,0.06);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    box-shadow: 0 10px 30px rgba(15,30,50,0.10);
+  }
+  .tile-icon {
+    width: 58px; height: 58px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tile-icon svg { width: 100%; height: 100%; display: block; }
+
+  /* === Kinetic title === */
+  .kinetic-line { overflow: hidden; line-height: 1.1; white-space: nowrap; }
+
+  /* === Glow rings === */
+  .ring {
+    position: absolute; border-radius: 50%;
+    border: 2px solid rgba(61,220,132,0.4);
+    opacity: 0;
+  }
+
+  /* === Step indicator === */
+  .step-indicator {
+    position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+    text-align: center; opacity: 0;
+  }
+  .step-indicator .step-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; color: #137333; letter-spacing: 5px; font-weight: 700;
+  }
+  .step-indicator .step-name {
+    font-size: 42px; font-weight: 800; color: #1F1F1F;
+    margin-top: 8px; letter-spacing: -1.5px;
+  }
+
+  /* === Logo glow === */
+  .logo-glow {
+    position: absolute;
+    background: radial-gradient(ellipse at center, rgba(61,220,132,0.30) 0%, rgba(66,133,244,0.10) 40%, transparent 70%);
+    filter: blur(40px); opacity: 0;
+  }
+
+  /* === Tap pulse === */
+  .tap-pulse {
+    position: absolute; width: 12px; height: 12px;
+    border-radius: 50%; background: #3DDC84;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 0 rgba(61,220,132,0.7);
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" class="stage">
+    <audio id="bgMusic" data-start="0" src="assets/music.wav" preload="auto"></audio>
+
+    <!-- Background -->
+    <div class="bg-base"></div>
+    <div class="bg-grid"></div>
+    <div id="scanline" class="scanline" style="top: -300px;"></div>
+    <div class="bg-vignette"></div>
+
+    <!-- Particles -->
+    <div id="particles"></div>
+
+    <!-- ============================================ -->
+    <!-- Scene 1: Hook (0-3s) -->
+    <!-- ============================================ -->
+    <div id="hook" class="stage">
+      <div id="logoGlow" class="logo-glow" style="left: 50%; top: 38%; margin-left: -260px; margin-top: -260px; width: 520px; height: 520px;"></div>
+
+      <!-- Concentric rings -->
+      <div class="ring" id="ring1" style="left: 50%; top: 38%; width: 280px; height: 280px; margin-left: -140px; margin-top: -140px;"></div>
+      <div class="ring" id="ring2" style="left: 50%; top: 38%; width: 380px; height: 380px; margin-left: -190px; margin-top: -190px;"></div>
+      <div class="ring" id="ring3" style="left: 50%; top: 38%; width: 480px; height: 480px; margin-left: -240px; margin-top: -240px;"></div>
+
+      <!-- Official Android Robot -->
+      <div id="androidLogo" style="position: absolute; left: 50%; top: 38%; width: 240px; height: 260px; margin-left: -120px; margin-top: -130px; opacity: 0;">
+        <svg viewBox="0 0 240 260" fill="none" style="width: 100%; height: 100%;">
+          <!-- Antennae -->
+          <line x1="80" y1="48" x2="62" y2="20" stroke="#3DDC84" stroke-width="6" stroke-linecap="round"/>
+          <line x1="160" y1="48" x2="178" y2="20" stroke="#3DDC84" stroke-width="6" stroke-linecap="round"/>
+          <!-- Head: semicircle (flat bottom) -->
+          <path d="M52 110 A68 68 0 0 1 188 110 Z" fill="#3DDC84"/>
+          <!-- Eyes -->
+          <circle cx="92" cy="84" r="6" fill="#FFFFFF"/>
+          <circle cx="148" cy="84" r="6" fill="#FFFFFF"/>
+          <!-- Body (rectangle, rounded bottom) -->
+          <path d="M52 122 L188 122 L188 200 Q188 210 178 210 L62 210 Q52 210 52 200 Z" fill="#3DDC84"/>
+          <!-- Arms -->
+          <rect x="28" y="125" width="18" height="74" rx="9" fill="#3DDC84"/>
+          <rect x="194" y="125" width="18" height="74" rx="9" fill="#3DDC84"/>
+          <!-- Legs -->
+          <rect x="78" y="210" width="20" height="44" rx="10" fill="#3DDC84"/>
+          <rect x="142" y="210" width="20" height="44" rx="10" fill="#3DDC84"/>
+        </svg>
+      </div>
+
+      <!-- Eyebrow tag -->
+      <div id="hookTag" style="position: absolute; left: 50%; top: 65%; transform: translate(-50%, -50%); opacity: 0;">
+        <div style="display: inline-flex; align-items: center; gap: 10px; padding: 9px 22px; background: rgba(61,220,132,0.10); border: 1px solid rgba(61,220,132,0.40); border-radius: 28px; font-size: 13px; font-weight: 700; color: #137333; letter-spacing: 4px;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #3DDC84; box-shadow: 0 0 8px #3DDC84;"></span>
+          AI &times; MOBILE
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #4285F4; box-shadow: 0 0 8px #4285F4;"></span>
+        </div>
+      </div>
+
+      <!-- Title -->
+      <div style="position: absolute; left: 50%; top: 75%; transform: translate(-50%, -50%); text-align: center;">
+        <div class="kinetic-line" id="hookTitle" style="font-size: 124px; font-weight: 900; letter-spacing: -5px; line-height: 1; color: #1F1F1F;"></div>
+        <div class="kinetic-line" id="hookSub" style="font-size: 22px; font-weight: 500; color: #5F6368; margin-top: 24px; letter-spacing: 7px;"></div>
+      </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- Scene 2: PERCEIVE (3-9s) -->
+    <!-- ============================================ -->
+    <div id="demo1" class="stage" style="opacity: 0;">
+
+      <div class="step-indicator" id="step1Indicator">
+        <div class="step-num">STEP 01 / 03</div>
+        <div class="step-name">PERCEIVE</div>
+      </div>
+
+      <!-- Phone -->
+      <div id="phone1" class="phone" style="left: 320px; top: 200px;">
+        <div class="phone-glow"></div>
+        <div class="phone-screen">
+          <div class="phone-notch"></div>
+          <div class="phone-statusbar"><span>9:41</span><span>5G &nbsp;·&nbsp; 100%</span></div>
+          <div style="padding: 50px 18px 18px;">
+            <div style="font-size: 11px; color: #5F6368; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">Settings</div>
+            <div style="font-size: 26px; font-weight: 800; color: #1F1F1F; margin-bottom: 18px; letter-spacing: -0.5px;">Connections</div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <div class="ui-row" id="item1" style="position: relative;">
+                <div class="ui-icon" style="background: #4285F4;">📶</div>
+                <div>
+                  <div class="ui-label">Wi-Fi</div>
+                  <div class="ui-sub">Off</div>
+                </div>
+                <div class="ui-toggle" id="toggle1"></div>
+              </div>
+              <div class="ui-row" id="item2">
+                <div class="ui-icon" style="background: #1A73E8;">𝐁</div>
+                <div>
+                  <div class="ui-label">Bluetooth</div>
+                  <div class="ui-sub">Off</div>
+                </div>
+                <div class="ui-toggle" id="toggle2"></div>
+              </div>
+              <div class="ui-row" id="item3">
+                <div class="ui-icon" style="background: #EA4335;">✈</div>
+                <div>
+                  <div class="ui-label">Airplane Mode</div>
+                  <div class="ui-sub">Off</div>
+                </div>
+                <div class="ui-toggle" id="toggle3"></div>
+              </div>
+              <div class="ui-row" id="item4">
+                <div class="ui-icon" style="background: #FBBC04;">🔋</div>
+                <div>
+                  <div class="ui-label">Battery Saver</div>
+                  <div class="ui-sub">Off</div>
+                </div>
+                <div class="ui-toggle" id="toggle4"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bounding boxes overlay (phone-relative) -->
+      <div id="bbox1" class="bbox" style="left: 334px; top: 330px; width: 312px; height: 76px;">
+        <div class="bbox-label">node[4] · Switch</div>
+      </div>
+      <div id="bbox2" class="bbox" style="left: 334px; top: 416px; width: 312px; height: 76px;">
+        <div class="bbox-label">node[5] · Switch</div>
+      </div>
+
+      <!-- Cursor -->
+      <svg id="cursor1" class="cursor-svg" style="left: 580px; top: 360px;" viewBox="0 0 32 32">
+        <path d="M3 3 L3 25 L9 19 L13 29 L17 27 L13 17 L24 17 Z" fill="#3DDC84" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+      <div id="cursorRing1" class="cursor-ring" style="left: 580px; top: 360px;"></div>
+      <div id="tap1" class="tap-pulse" style="left: 580px; top: 360px;"></div>
+
+      <!-- Connection line -->
+      <svg id="connLine1" style="position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; opacity: 0;">
+        <defs>
+          <linearGradient id="lineGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#3DDC84" stop-opacity="0"/>
+            <stop offset="50%" stop-color="#3DDC84" stop-opacity="0.9"/>
+            <stop offset="100%" stop-color="#3DDC84" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="M 660 460 C 800 460 920 380 1100 380" stroke="url(#lineGrad1)" stroke-width="2.5" stroke-dasharray="8,8" fill="none"/>
+      </svg>
+
+      <!-- A11y tree panel -->
+      <div id="a11yTree1" class="a11y-panel" style="left: 1100px; top: 240px; width: 540px; opacity: 0;">
+        <div class="a11y-header">
+          <div class="a11y-dot"></div>
+          ACCESSIBILITY TREE · PARSED
+        </div>
+        <div class="a11y-node" id="n1_1"><span class="a11y-tag">FrameLayout</span> <span class="a11y-attr">id</span>=<span class="a11y-str">"root"</span></div>
+        <div class="a11y-node" id="n1_2">  <span class="a11y-tag">RecyclerView</span> <span class="a11y-attr">scroll</span>=<span class="a11y-str">"true"</span></div>
+        <div class="a11y-node" id="n1_3">    <span class="a11y-tag">LinearLayout</span> <span class="a11y-attr">role</span>=<span class="a11y-str">"item"</span></div>
+        <div class="a11y-node" id="n1_4">      <span class="a11y-tag">TextView</span> <span class="a11y-str">"Wi-Fi"</span></div>
+        <div class="a11y-node" id="n1_5">      <span class="a11y-target"><span class="a11y-tag">▶ Switch</span> <span class="a11y-attr">checked</span>=<span class="a11y-str">"false"</span></span></div>
+        <div class="a11y-node" id="n1_6" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(61,220,132,0.25);">
+          <span style="color: #137333; font-weight: 700;">→ ACTION:</span> <span style="color: #1F1F1F; font-weight: 700;">click(node[4])</span>
+        </div>
+      </div>
+
+      <div class="caption" id="caption1">
+        <div class="caption-tag">PERCEIVE → ACT</div>
+        <div class="caption-text">AI parses the UI tree, then clicks with intent</div>
+      </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- Scene 3: NAVIGATE (9-15s) -->
+    <!-- ============================================ -->
+    <div id="demo2" class="stage" style="opacity: 0;">
+
+      <div class="step-indicator" id="step2Indicator">
+        <div class="step-num">STEP 02 / 03</div>
+        <div class="step-name">NAVIGATE</div>
+      </div>
+
+      <!-- Phone (right side) -->
+      <div id="phone2" class="phone" style="left: 1260px; top: 200px;">
+        <div class="phone-glow"></div>
+        <div class="phone-screen">
+          <div class="phone-notch"></div>
+          <div class="phone-statusbar"><span>9:42</span><span>5G &nbsp;·&nbsp; 100%</span></div>
+          <div style="padding: 50px 18px 18px;">
+            <div style="font-size: 11px; color: #5F6368; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">Maps</div>
+            <div style="font-size: 26px; font-weight: 800; color: #1F1F1F; margin-bottom: 18px; letter-spacing: -0.5px;">Plan a Route</div>
+            <div style="background: linear-gradient(135deg, #E8F5E9, #E3F2FD); border-radius: 16px; height: 280px; position: relative; overflow: hidden; margin-bottom: 14px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);">
+              <svg viewBox="0 0 300 280" style="position: absolute; inset: 0; width: 100%; height: 100%;">
+                <!-- Road grid -->
+                <line x1="0" y1="80" x2="300" y2="80" stroke="rgba(95,99,104,0.12)" stroke-width="6"/>
+                <line x1="0" y1="180" x2="300" y2="180" stroke="rgba(95,99,104,0.12)" stroke-width="6"/>
+                <line x1="120" y1="0" x2="120" y2="280" stroke="rgba(95,99,104,0.12)" stroke-width="6"/>
+                <line x1="220" y1="0" x2="220" y2="280" stroke="rgba(95,99,104,0.12)" stroke-width="6"/>
+                <!-- Route -->
+                <path id="routePath" d="M 30 230 L 120 230 L 120 80 L 220 80 L 260 50" stroke="#3DDC84" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="500" stroke-dashoffset="500"/>
+                <!-- Pins -->
+                <circle cx="30" cy="230" r="9" fill="#4285F4" stroke="white" stroke-width="3"/>
+                <circle cx="260" cy="50" r="11" fill="#EA4335" stroke="white" stroke-width="3"/>
+                <text x="46" y="246" font-family="Inter" font-size="10" font-weight="700" fill="#1F1F1F">YOU</text>
+                <text x="226" y="38" font-family="Inter" font-size="10" font-weight="700" fill="#1F1F1F">CAFÉ</text>
+              </svg>
+              <div style="position: absolute; top: 12px; right: 12px; padding: 5px 12px; background: white; border-radius: 14px; font-size: 11px; font-weight: 700; color: #137333; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">12 min · 0.8 mi</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <div class="ui-row" id="map1">
+                <div class="ui-icon" style="background: #3DDC84;">▶</div>
+                <div>
+                  <div class="ui-label">Start Navigation</div>
+                  <div class="ui-sub">Driving · best route</div>
+                </div>
+              </div>
+              <div class="ui-row" id="map2">
+                <div class="ui-icon" style="background: #5F6368;">★</div>
+                <div>
+                  <div class="ui-label">Save Place</div>
+                  <div class="ui-sub">Add to favorites</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bounding box on Start Navigation -->
+      <div id="bbox3" class="bbox" style="left: 1274px; top: 612px; width: 312px; height: 78px;">
+        <div class="bbox-label">node[7] · Button "Start"</div>
+      </div>
+
+      <!-- Cursor -->
+      <svg id="cursor2" class="cursor-svg" style="left: 1240px; top: 360px;" viewBox="0 0 32 32">
+        <path d="M3 3 L3 25 L9 19 L13 29 L17 27 L13 17 L24 17 Z" fill="#3DDC84" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+      <div id="cursorRing2" class="cursor-ring" style="left: 1240px; top: 360px;"></div>
+      <div id="tap2" class="tap-pulse" style="left: 1240px; top: 360px;"></div>
+
+      <!-- Goal panel -->
+      <div id="goalPanel" class="a11y-panel" style="left: 240px; top: 220px; width: 580px; opacity: 0;">
+        <div class="a11y-header">
+          <div class="a11y-dot"></div>
+          NATURAL LANGUAGE GOAL
+        </div>
+        <div style="font-family: 'Google Sans', sans-serif; font-size: 22px; font-weight: 600; color: #1F1F1F; line-height: 1.45; margin-bottom: 6px;">
+          <span style="color: #5F6368;">"</span>Open Maps and start navigation to the nearest café<span style="color: #5F6368;">"</span>
+        </div>
+        <div style="height: 1px; background: rgba(61,220,132,0.25); margin: 18px 0;"></div>
+        <div class="a11y-header">
+          <div class="a11y-dot"></div>
+          PLAN · EXECUTING
+        </div>
+        <div style="font-size: 14px; line-height: 1.85;">
+          <div class="a11y-node" id="p2_1" style="display: flex; align-items: center; gap: 10px;">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #3DDC84; color: white; font-weight: 700; font-size: 11px;">✓</span>
+            <span style="color: #1F1F1F; font-weight: 600;">Locate Maps app</span>
+          </div>
+          <div class="a11y-node" id="p2_2" style="display: flex; align-items: center; gap: 10px;">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #3DDC84; color: white; font-weight: 700; font-size: 11px;">✓</span>
+            <span style="color: #1F1F1F; font-weight: 600;">Search "café"</span>
+          </div>
+          <div class="a11y-node" id="p2_3" style="display: flex; align-items: center; gap: 10px;">
+            <span id="p2_3check" style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #FBBC04; color: white; font-weight: 700; font-size: 11px;">3</span>
+            <span style="color: #1F1F1F; font-weight: 600;">Tap "Start Navigation"</span>
+            <span style="color: #B06000; font-weight: 700; font-size: 11px; letter-spacing: 1px; margin-left: 4px;">◀ ACTING</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="caption" id="caption2">
+        <div class="caption-tag">PLAN → EXECUTE</div>
+        <div class="caption-text">From natural language to multi-step actions</div>
+      </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- Scene 4: EVALUATE (15-21s) -->
+    <!-- ============================================ -->
+    <div id="metrics" class="stage" style="opacity: 0;">
+
+      <div class="step-indicator" id="step3Indicator">
+        <div class="step-num">STEP 03 / 03</div>
+        <div class="step-name">EVALUATE</div>
+      </div>
+
+      <div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%;">
+        <div id="metricsHeader" style="font-size: 16px; font-weight: 700; color: #137333; letter-spacing: 5px; margin-bottom: 14px; opacity: 0;">ANDROID CONTROL · BENCHMARK</div>
+        <div id="metricsTitle" style="font-size: 54px; font-weight: 900; color: #1F1F1F; line-height: 1.1; letter-spacing: -2px; margin-bottom: 56px; opacity: 0;">
+          Gemma 4 E2B <span style="background: linear-gradient(135deg, #3DDC84, #1A73E8); -webkit-background-clip: text; background-clip: text; color: transparent;">fine-tuning results</span>
+        </div>
+
+        <div style="display: flex; align-items: stretch; justify-content: center; gap: 36px;">
+          <div class="stat-card" style="opacity: 0;" id="card1">
+            <div class="stat-num" style="color: #9AA0A6;" id="metricBefore">0%</div>
+            <div class="stat-label">BASELINE GEMMA 4</div>
+          </div>
+          <div id="arrowIcon" style="display: flex; align-items: center; opacity: 0;">
+            <svg width="92" height="92" viewBox="0 0 92 92">
+              <defs>
+                <linearGradient id="arrowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#9AA0A6"/>
+                  <stop offset="100%" stop-color="#3DDC84"/>
+                </linearGradient>
+              </defs>
+              <path d="M 12 46 L 70 46 M 56 28 L 78 46 L 56 64" stroke="url(#arrowGrad)" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="stat-card" id="card2" style="opacity: 0; border-color: rgba(61,220,132,0.45); box-shadow: 0 18px 50px rgba(61,220,132,0.20), 0 0 0 1px rgba(61,220,132,0.40);">
+            <div class="stat-num" id="metricAfter" style="background: linear-gradient(135deg, #3DDC84, #34A853); -webkit-background-clip: text; background-clip: text; color: transparent;">0%</div>
+            <div class="stat-label" style="color: #137333;">FINE-TUNED GEMMA 4</div>
+          </div>
+        </div>
+
+        <div id="improvementBlock" style="margin-top: 56px; opacity: 0;">
+          <span style="font-size: 116px; font-weight: 900; background: linear-gradient(135deg, #3DDC84, #4285F4); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: -4px;">+35%</span>
+          <span style="font-size: 22px; font-weight: 700; color: #5F6368; margin-left: 18px; letter-spacing: 3px;">RELATIVE LIFT</span>
+        </div>
+        <div id="improvementSub" style="margin-top: 12px; opacity: 0; font-size: 15px; color: #5F6368; letter-spacing: 1.5px;">
+          Path W &nbsp;·&nbsp; CAP-style schema &nbsp;·&nbsp; one-step action history
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- Scene 5: SCALE (21-26s) -->
+    <!-- ============================================ -->
+    <div id="tasks" class="stage" style="opacity: 0;">
+
+      <div class="step-indicator" id="step4Indicator" style="opacity: 0;">
+        <div class="step-num">SCALE · COVERAGE</div>
+      </div>
+
+      <div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center;">
+        <div id="tasksHeader" style="font-size: 16px; font-weight: 700; color: #137333; letter-spacing: 5px; margin-bottom: 14px; opacity: 0;">EVALUATED ACROSS</div>
+        <div id="tasksNumber" style="font-size: 240px; font-weight: 900; line-height: 1; letter-spacing: -10px; background: linear-gradient(135deg, #3DDC84 0%, #4285F4 60%, #1A73E8 100%); -webkit-background-clip: text; background-clip: text; color: transparent;">0</div>
+        <div id="tasksLabel" style="font-size: 36px; font-weight: 800; color: #1F1F1F; margin-top: 18px; letter-spacing: -1px; opacity: 0;">distinct Android tasks mastered</div>
+        <div id="tasksSub" style="font-size: 16px; font-weight: 500; color: #5F6368; margin-top: 14px; letter-spacing: 1.5px; opacity: 0;">across system apps · browsers · productivity · communication</div>
+      </div>
+
+      <div id="tileGrid" style="position: absolute; inset: 0; pointer-events: none;"></div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- Scene 6: ENDING (26-30s) -->
+    <!-- ============================================ -->
+    <div id="ending" class="stage" style="opacity: 0;">
+      <div id="endLogoGlow" class="logo-glow" style="left: 50%; top: 32%; margin-left: -350px; margin-top: -350px; width: 700px; height: 700px;"></div>
+
+      <div id="endLogo" style="position: absolute; left: 50%; top: 26%; margin-left: -75px; margin-top: -80px; width: 150px; height: 160px; opacity: 0;">
+        <svg viewBox="0 0 240 260" fill="none" style="width: 100%; height: 100%;">
+          <line x1="80" y1="48" x2="62" y2="20" stroke="#3DDC84" stroke-width="6" stroke-linecap="round"/>
+          <line x1="160" y1="48" x2="178" y2="20" stroke="#3DDC84" stroke-width="6" stroke-linecap="round"/>
+          <path d="M52 110 A68 68 0 0 1 188 110 Z" fill="#3DDC84"/>
+          <circle cx="92" cy="84" r="6" fill="#FFFFFF"/>
+          <circle cx="148" cy="84" r="6" fill="#FFFFFF"/>
+          <path d="M52 122 L188 122 L188 200 Q188 210 178 210 L62 210 Q52 210 52 200 Z" fill="#3DDC84"/>
+          <rect x="28" y="125" width="18" height="74" rx="9" fill="#3DDC84"/>
+          <rect x="194" y="125" width="18" height="74" rx="9" fill="#3DDC84"/>
+          <rect x="78" y="210" width="20" height="44" rx="10" fill="#3DDC84"/>
+          <rect x="142" y="210" width="20" height="44" rx="10" fill="#3DDC84"/>
+        </svg>
+      </div>
+
+      <div style="position: absolute; left: 50%; top: 56%; transform: translate(-50%, -50%); text-align: center; width: 100%;">
+        <div class="kinetic-line" id="endTitleLine1" style="font-size: 100px; font-weight: 900; line-height: 1; letter-spacing: -3.5px; color: #1F1F1F;"></div>
+        <div class="kinetic-line" id="endTitleLine2" style="font-size: 100px; font-weight: 900; line-height: 1; letter-spacing: -3.5px; margin-top: 10px; color: #34A853;"></div>
+        <div id="endMeta" style="margin-top: 44px; opacity: 0;">
+          <div style="display: inline-flex; align-items: center; gap: 14px; padding: 12px 28px; background: rgba(61,220,132,0.10); border: 1px solid rgba(61,220,132,0.4); border-radius: 32px;">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #3DDC84; box-shadow: 0 0 8px #3DDC84;"></div>
+            <span style="font-size: 15px; font-weight: 700; color: #1F1F1F; letter-spacing: 4.5px;">CSULA AI RESEARCH · CS5661 · SPRING 2026</span>
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #4285F4; box-shadow: 0 0 8px #4285F4;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="assets/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines["main"] = gsap.timeline({ paused: true });
+    const tl = window.__timelines["main"];
+
+    // === Seeded PRNG ===
+    function mulberry32(a) {
+      return function() {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        var t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      }
+    }
+    const rng = mulberry32(11);
+
+    // === Particles ===
+    const particlesContainer = document.getElementById('particles');
+    const PARTICLE_COUNT = 80;
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const p = document.createElement('div');
+      const r = rng();
+      let cls = '';
+      if (r > 0.78) cls = ' blue';
+      else if (r > 0.62) cls = ' yellow';
+      else if (r > 0.55) cls = ' red';
+      p.className = 'particle' + cls;
+      p.style.left = (rng() * 1920) + 'px';
+      p.style.top = (rng() * 1080) + 'px';
+      const size = (rng() * 5 + 2) + 'px';
+      p.style.width = size; p.style.height = size;
+      particlesContainer.appendChild(p);
+    }
+
+    // === Build kinetic letters ===
+    function buildLetters(elId, text) {
+      const el = document.getElementById(elId);
+      text.split('').forEach(c => {
+        const span = document.createElement('span');
+        span.className = 'letter';
+        span.textContent = c === ' ' ? ' ' : c;
+        el.appendChild(span);
+      });
+    }
+    buildLetters('hookTitle', 'ANDROID CONTROL');
+    buildLetters('hookSub', 'AI AGENTS FOR MOBILE UIs');
+    buildLetters('endTitleLine1', 'THE FUTURE OF');
+    buildLetters('endTitleLine2', 'MOBILE IS AGENTIC');
+
+    // === Android app icons (SVG) ===
+    const APP_ICONS = [
+      // Chrome
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="20" cy="20" r="18" fill="#fff"/>
+        <path d="M20 20 L4.4 11 A18 18 0 0 1 35.6 11 Z" fill="#EA4335"/>
+        <path d="M20 20 L35.6 11 A18 18 0 0 1 20 38 Z" fill="#FBBC04"/>
+        <path d="M20 20 L20 38 A18 18 0 0 1 4.4 11 Z" fill="#34A853"/>
+        <circle cx="20" cy="20" r="7" fill="#4285F4"/>
+        <circle cx="20" cy="20" r="5" fill="#fff"/>
+      </svg>`,
+      // Gmail
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="10" width="32" height="22" rx="2" fill="#fff"/>
+        <path d="M4 10 L20 22 L36 10 L36 32 L4 32 Z" fill="#EA4335"/>
+        <path d="M4 10 L4 32 L13 22 Z" fill="#C5221F"/>
+        <path d="M36 10 L36 32 L27 22 Z" fill="#C5221F"/>
+      </svg>`,
+      // Maps
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 5 C13.4 5 8 10.4 8 17 C8 26 20 35 20 35 S32 26 32 17 C32 10.4 26.6 5 20 5 Z" fill="#EA4335"/>
+        <circle cx="20" cy="17" r="5" fill="#fff"/>
+      </svg>`,
+      // Calendar
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <rect x="5" y="7" width="30" height="28" rx="2" fill="#fff" stroke="#DADCE0" stroke-width="0.5"/>
+        <rect x="5" y="7" width="30" height="9" fill="#4285F4"/>
+        <text x="20" y="29" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#1F1F1F" text-anchor="middle">31</text>
+      </svg>`,
+      // Camera
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="11" width="32" height="22" rx="3" fill="#5F6368"/>
+        <rect x="14" y="6" width="12" height="6" rx="1" fill="#80868B"/>
+        <circle cx="20" cy="22" r="7" fill="#1A73E8"/>
+        <circle cx="20" cy="22" r="5" fill="#1F1F1F"/>
+        <circle cx="22" cy="20" r="1.5" fill="#fff" opacity="0.6"/>
+      </svg>`,
+      // Photos (4-color pinwheel)
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(20 20)">
+          <path d="M0 -14 C4 -10 4 -4 0 0 C-4 -4 -4 -10 0 -14 Z" fill="#EA4335"/>
+          <path d="M14 0 C10 4 4 4 0 0 C4 -4 10 -4 14 0 Z" fill="#FBBC04"/>
+          <path d="M0 14 C-4 10 -4 4 0 0 C4 4 4 10 0 14 Z" fill="#34A853"/>
+          <path d="M-14 0 C-10 -4 -4 -4 0 0 C-4 4 -10 4 -14 0 Z" fill="#4285F4"/>
+        </g>
+      </svg>`,
+      // Messages
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 7 L30 7 Q35 7 35 12 L35 25 Q35 30 30 30 L18 30 L10 36 L10 30 Q5 30 5 25 L5 12 Q5 7 10 7 Z" fill="#34A853"/>
+        <circle cx="14" cy="18" r="2" fill="#fff"/>
+        <circle cx="20" cy="18" r="2" fill="#fff"/>
+        <circle cx="26" cy="18" r="2" fill="#fff"/>
+      </svg>`,
+      // Settings (gear)
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(20 20)" fill="#5F6368">
+          <rect x="-2.5" y="-17" width="5" height="6" rx="1"/>
+          <rect x="-2.5" y="11" width="5" height="6" rx="1"/>
+          <rect x="-17" y="-2.5" width="6" height="5" rx="1"/>
+          <rect x="11" y="-2.5" width="6" height="5" rx="1"/>
+          <rect x="-2.5" y="-17" width="5" height="6" rx="1" transform="rotate(45)"/>
+          <rect x="-2.5" y="-17" width="5" height="6" rx="1" transform="rotate(-45)"/>
+          <rect x="-2.5" y="11" width="5" height="6" rx="1" transform="rotate(45)"/>
+          <rect x="-2.5" y="11" width="5" height="6" rx="1" transform="rotate(-45)"/>
+          <circle r="11"/>
+        </g>
+        <circle cx="20" cy="20" r="4.5" fill="#fff"/>
+      </svg>`,
+      // Play Store
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 5 L28 20 L8 35 Z" fill="#34A853"/>
+        <path d="M8 5 L18 15 L8 25 Z" fill="#FBBC04"/>
+        <path d="M28 20 L18 15 L8 5 Z" fill="#EA4335"/>
+        <path d="M8 35 L18 25 L28 20 Z" fill="#4285F4"/>
+      </svg>`,
+      // Clock
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="20" cy="20" r="17" fill="#fff" stroke="#1F1F1F" stroke-width="2"/>
+        <line x1="20" y1="20" x2="20" y2="10" stroke="#1F1F1F" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="20" y1="20" x2="28" y2="22" stroke="#EA4335" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="20" cy="20" r="2" fill="#1F1F1F"/>
+      </svg>`,
+      // YouTube
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="10" width="34" height="22" rx="6" fill="#FF0000"/>
+        <path d="M17 16 L26 21 L17 26 Z" fill="#fff"/>
+      </svg>`,
+      // Drive
+      `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14 6 L26 6 L36 22 L24 22 Z" fill="#FBBC04"/>
+        <path d="M14 6 L4 22 L10 32 L20 16 Z" fill="#34A853"/>
+        <path d="M10 32 L36 22 L30 32 Z" fill="#4285F4"/>
+      </svg>`
+    ];
+
+    // === Tile grid (perimeter cluster) ===
+    const tileGrid = document.getElementById('tileGrid');
+    const tilePositions = [
+      [140, 160], [280, 220], [200, 360], [110, 510], [260, 660], [150, 810],
+      [1670, 180], [1780, 320], [1610, 460], [1740, 600], [1650, 750], [1780, 870],
+      [380, 100], [560, 180], [1320, 140], [1480, 230],
+      [380, 880], [560, 800], [1320, 920], [1480, 820],
+      [60, 360], [60, 660], [1840, 380], [1840, 660]
+    ];
+    const iconOrder = [0, 2, 5, 8, 1, 10, 3, 6, 4, 11, 7, 9, 0, 5, 2, 10, 1, 8, 11, 6, 3, 9, 4, 7];
+    tilePositions.forEach((pos, i) => {
+      const t = document.createElement('div');
+      t.className = 'tile';
+      t.style.left = pos[0] + 'px';
+      t.style.top = pos[1] + 'px';
+      const ico = document.createElement('div');
+      ico.className = 'tile-icon';
+      ico.innerHTML = APP_ICONS[iconOrder[i % iconOrder.length]];
+      t.appendChild(ico);
+      tileGrid.appendChild(t);
+    });
+
+    // ===== Ambient =====
+    tl.to('#scanline', { y: 1380, duration: 7.5, ease: 'none', repeat: 3 }, 0);
+
+    // ============================================
+    // SCENE 1: Hook (0-3s)
+    // ============================================
+    tl.to('#logoGlow', { opacity: 1, scale: 1.4, duration: 1.0, ease: 'power2.out' }, 0.05);
+
+    // Concentric rings expand
+    tl.fromTo(['#ring1', '#ring2', '#ring3'],
+      { opacity: 0, scale: 0.4 },
+      { opacity: 0.7, scale: 1, duration: 1.0, stagger: 0.10, ease: 'power2.out' }, 0.2);
+    tl.to(['#ring1', '#ring2', '#ring3'],
+      { opacity: 0, scale: 1.6, duration: 0.8, stagger: 0.08, ease: 'power2.in' }, 1.4);
+
+    // Robot materializes
+    tl.fromTo('#androidLogo',
+      { opacity: 0, scale: 0.3, rotation: -25, y: 40 },
+      { opacity: 1, scale: 1, rotation: 0, y: 0, duration: 0.95, ease: 'back.out(1.7)' }, 0.3);
+    tl.to('#androidLogo', { y: -16, duration: 0.4, ease: 'power2.out', yoyo: true, repeat: 1 }, 1.30);
+
+    // Tag fade in
+    tl.fromTo('#hookTag', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 1.05);
+
+    // Title kinetic
+    tl.to('#hookTitle .letter',
+      { opacity: 1, y: 0, duration: 0.55, stagger: 0.026, ease: 'power3.out' }, 1.15);
+    tl.to('#hookSub .letter',
+      { opacity: 1, y: 0, duration: 0.4, stagger: 0.012, ease: 'power2.out' }, 1.7);
+
+    // Particles burst
+    tl.to('.particle', {
+      opacity: 0.7, scale: 1.4, duration: 0.6,
+      stagger: { each: 0.006, from: 'center' }, ease: 'power2.out'
+    }, 0.4);
+    tl.to('.particle', { opacity: 0.35, scale: 1, duration: 0.7 }, 2.2);
+
+    // Exit
+    tl.to('#hook', { opacity: 0, scale: 1.04, duration: 0.4, ease: 'power2.in' }, 2.7);
+    tl.set('#hook', { display: 'none' }, 3.05);
+
+    // ============================================
+    // SCENE 2: PERCEIVE (3-9s)
+    // ============================================
+    tl.set('#demo1', { opacity: 1 }, 3.0);
+
+    tl.fromTo('#step1Indicator', { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 3.0);
+
+    // Phone slides in from left
+    tl.fromTo('#phone1',
+      { x: -180, opacity: 0, rotationY: -18 },
+      { x: 0, opacity: 1, rotationY: 0, duration: 0.85, ease: 'power3.out' }, 3.05);
+    tl.to('#phone1 .phone-glow', { opacity: 1, duration: 0.6 }, 3.4);
+
+    // Cursor enters from above-right of phone
+    tl.fromTo('#cursor1',
+      { x: 100, y: -60, opacity: 0, scale: 1.5 },
+      { x: 0, y: 0, opacity: 1, scale: 1, duration: 0.6, ease: 'power2.out' }, 3.4);
+
+    // Connection line + tree panel
+    tl.to('#connLine1', { opacity: 1, duration: 0.4 }, 3.95);
+    tl.fromTo('#a11yTree1',
+      { opacity: 0, x: 60, scale: 0.95 },
+      { opacity: 1, x: 0, scale: 1, duration: 0.55, ease: 'power2.out' }, 4.0);
+
+    // Tree streams in
+    tl.to('#n1_1', { opacity: 1, duration: 0.15 }, 4.15);
+    tl.to('#n1_2', { opacity: 1, duration: 0.15 }, 4.30);
+    tl.to('#n1_3', { opacity: 1, duration: 0.15 }, 4.45);
+    tl.to('#n1_4', { opacity: 1, duration: 0.15 }, 4.60);
+    tl.to('#n1_5', { opacity: 1, duration: 0.20 }, 4.78);
+    tl.to('#n1_6', { opacity: 1, duration: 0.20 }, 5.05);
+
+    // Bounding box highlight on Wi-Fi
+    tl.fromTo('#bbox1', { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.35, ease: 'power2.out' }, 5.1);
+
+    // Cursor → tap Wi-Fi toggle (toggle is at right side of item1, ~x:611, y:368)
+    tl.to('#cursor1', { x: 28, y: 5, duration: 0.55, ease: 'power2.inOut' }, 5.45);
+    tl.to('#cursorRing1', { left: 611, top: 368, duration: 0.55, ease: 'power2.inOut' }, 5.45);
+    tl.fromTo('#cursorRing1', { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1.5, duration: 0.3, ease: 'power2.out' }, 6.0);
+    tl.to('#cursorRing1', { opacity: 0, scale: 2.6, duration: 0.4, ease: 'power2.in' }, 6.3);
+    tl.to('#item1', { borderColor: '#3DDC84', backgroundColor: 'rgba(61,220,132,0.10)', duration: 0.3 }, 6.05);
+    tl.to('#toggle1', { backgroundColor: '#3DDC84', duration: 0.4 }, 6.05);
+    tl.set('#toggle1', { className: 'ui-toggle on' }, 6.15);
+    tl.to('#bbox1', { opacity: 0, duration: 0.3 }, 6.3);
+
+    // Bounding box on Bluetooth
+    tl.fromTo('#bbox2', { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 6.5);
+
+    // Tap Bluetooth toggle (~x:611, y:454)
+    tl.to('#cursor1', { x: 28, y: 91, duration: 0.45, ease: 'power2.inOut' }, 6.7);
+    tl.to('#cursorRing1', { left: 611, top: 454, duration: 0.45, ease: 'power2.inOut' }, 6.7);
+    tl.fromTo('#cursorRing1', { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1.5, duration: 0.28 }, 7.05);
+    tl.to('#cursorRing1', { opacity: 0, scale: 2.6, duration: 0.35, ease: 'power2.in' }, 7.35);
+    tl.to('#item2', { borderColor: '#3DDC84', backgroundColor: 'rgba(61,220,132,0.10)', duration: 0.3 }, 7.1);
+    tl.to('#toggle2', { backgroundColor: '#3DDC84', duration: 0.4 }, 7.1);
+    tl.set('#toggle2', { className: 'ui-toggle on' }, 7.2);
+    tl.to('#bbox2', { opacity: 0, duration: 0.3 }, 7.3);
+
+    // Caption
+    tl.fromTo('#caption1', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 7.5);
+
+    // Exit
+    tl.to('#demo1', { opacity: 0, scale: 0.97, duration: 0.4, ease: 'power2.in' }, 8.55);
+    tl.set('#caption1', { opacity: 0, visibility: 'hidden' }, 8.95);
+    tl.set('#demo1', { display: 'none' }, 8.95);
+
+    // ============================================
+    // SCENE 3: NAVIGATE (9-15s)
+    // ============================================
+    tl.set('#demo2', { opacity: 1 }, 9.0);
+
+    tl.fromTo('#step2Indicator', { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 9.0);
+
+    // Phone slides in from right
+    tl.fromTo('#phone2',
+      { x: 180, opacity: 0, rotationY: 18 },
+      { x: 0, opacity: 1, rotationY: 0, duration: 0.85, ease: 'power3.out' }, 9.05);
+    tl.to('#phone2 .phone-glow', { opacity: 1, duration: 0.6 }, 9.4);
+
+    // Animate the route drawing in
+    tl.to('#routePath', { strokeDashoffset: 0, duration: 1.2, ease: 'power2.inOut' }, 9.7);
+
+    // Cursor enters
+    tl.fromTo('#cursor2',
+      { x: -90, y: -60, opacity: 0, scale: 1.5 },
+      { x: 0, y: 0, opacity: 1, scale: 1, duration: 0.6, ease: 'power2.out' }, 9.4);
+
+    // Goal panel slides in
+    tl.fromTo('#goalPanel',
+      { opacity: 0, x: -60, scale: 0.95 },
+      { opacity: 1, x: 0, scale: 1, duration: 0.55, ease: 'power2.out' }, 9.85);
+
+    // Plan steps cascade
+    tl.to('#p2_1', { opacity: 1, duration: 0.25 }, 10.3);
+    tl.to('#p2_2', { opacity: 1, duration: 0.25 }, 10.7);
+    tl.to('#p2_3', { opacity: 1, duration: 0.25 }, 11.1);
+
+    // Bounding box on Start Navigation button
+    tl.fromTo('#bbox3', { opacity: 0, scale: 0.95 }, { opacity: 1, scale: 1, duration: 0.35, ease: 'power2.out' }, 11.5);
+
+    // Cursor moves to Start Navigation button (button center ~x:1430, y:651)
+    tl.to('#cursor2', { x: 187, y: 288, duration: 0.7, ease: 'power2.inOut' }, 11.65);
+    tl.to('#cursorRing2', { left: 1430, top: 651, duration: 0.7, ease: 'power2.inOut' }, 11.65);
+    tl.fromTo('#cursorRing2', { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1.6, duration: 0.32 }, 12.32);
+    tl.to('#cursorRing2', { opacity: 0, scale: 2.8, duration: 0.4, ease: 'power2.in' }, 12.66);
+    tl.to('#map1', { borderColor: '#3DDC84', backgroundColor: 'rgba(61,220,132,0.12)', duration: 0.3 }, 12.4);
+
+    // Step 3 check turns green
+    tl.to('#p2_3check', {
+      backgroundColor: '#3DDC84', duration: 0.3,
+      onComplete: () => { document.getElementById('p2_3check').textContent = '✓'; }
+    }, 12.5);
+
+    // Caption
+    tl.fromTo('#caption2', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 12.85);
+
+    // Exit
+    tl.to('#demo2', { opacity: 0, scale: 0.97, duration: 0.4, ease: 'power2.in' }, 14.55);
+    tl.set('#caption2', { opacity: 0, visibility: 'hidden' }, 14.95);
+    tl.set('#demo2', { display: 'none' }, 14.95);
+
+    // ============================================
+    // SCENE 4: EVALUATE (15-21s)
+    // ============================================
+    tl.set('#metrics', { opacity: 1 }, 15.0);
+
+    tl.fromTo('#step3Indicator', { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 15.0);
+    tl.fromTo('#metricsHeader', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.45, ease: 'power2.out' }, 15.3);
+    tl.fromTo('#metricsTitle', { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 15.5);
+
+    tl.fromTo('#card1', { opacity: 0, y: 40, scale: 0.85 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: 'back.out(1.4)' }, 16.05);
+
+    // Baseline number 0 → 39
+    tl.to({}, {
+      duration: 1.1,
+      onUpdate: function() {
+        const v = Math.round(this.progress() * 39);
+        document.getElementById('metricBefore').textContent = v + '%';
+      }
+    }, 16.25);
+
+    tl.fromTo('#arrowIcon', { opacity: 0, scale: 0.5, x: -30 }, { opacity: 1, scale: 1, x: 0, duration: 0.55, ease: 'back.out(1.7)' }, 17.15);
+
+    tl.fromTo('#card2', { opacity: 0, y: 40, scale: 0.85 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: 'back.out(1.4)' }, 17.45);
+
+    // Fine-tuned number 0 → 53
+    tl.to({}, {
+      duration: 1.3,
+      onUpdate: function() {
+        const v = Math.round(this.progress() * 53);
+        document.getElementById('metricAfter').textContent = v + '%';
+      }
+    }, 17.65);
+
+    tl.fromTo('#improvementBlock',
+      { opacity: 0, scale: 0.65, y: 25 },
+      { opacity: 1, scale: 1, y: 0, duration: 0.75, ease: 'elastic.out(1, 0.55)' }, 18.85);
+    tl.fromTo('#improvementSub',
+      { opacity: 0, y: 14 },
+      { opacity: 1, y: 0, duration: 0.45, ease: 'power2.out' }, 19.55);
+
+    // Particles pulse
+    tl.to('.particle', {
+      opacity: 0.85, scale: 1.8, duration: 0.6,
+      stagger: { each: 0.008, from: 'random' }, ease: 'power2.out'
+    }, 18.85);
+    tl.to('.particle', { opacity: 0.3, scale: 1, duration: 0.5 }, 19.6);
+
+    tl.to('#metrics', { opacity: 0, scale: 0.97, duration: 0.4, ease: 'power2.in' }, 20.55);
+    tl.set('#metrics', { display: 'none' }, 20.95);
+
+    // ============================================
+    // SCENE 5: SCALE (21-26s)
+    // ============================================
+    tl.set('#tasks', { opacity: 1 }, 21.0);
+
+    tl.fromTo('#step4Indicator', { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 21.0);
+    tl.fromTo('#tasksHeader', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' }, 21.1);
+
+    // Number count-up 0 → 116
+    tl.to({}, {
+      duration: 2.0,
+      onUpdate: function() {
+        const v = Math.round(this.progress() * 116);
+        document.getElementById('tasksNumber').textContent = v;
+      }
+    }, 21.3);
+
+    tl.fromTo('#tasksLabel', { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 22.5);
+    tl.fromTo('#tasksSub', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }, 22.85);
+
+    // Tiles cascade in
+    tl.to('.tile', {
+      opacity: 1, scale: 1, duration: 0.45, ease: 'back.out(1.7)',
+      stagger: { each: 0.038, from: 'random' }
+    }, 21.6);
+
+    // Tiles float
+    tl.to('.tile', {
+      y: '-=12', duration: 1.4, yoyo: true, repeat: 1,
+      stagger: { each: 0.05, from: 'random' }, ease: 'sine.inOut'
+    }, 23.5);
+
+    tl.to('#tasks', { opacity: 0, scale: 0.97, duration: 0.4, ease: 'power2.in' }, 25.55);
+    tl.set('#tasks', { display: 'none' }, 25.95);
+
+    // ============================================
+    // SCENE 6: ENDING (26-30s)
+    // ============================================
+    tl.set('#ending', { opacity: 1 }, 26.0);
+
+    tl.to('#endLogoGlow', { opacity: 1, scale: 1.3, duration: 1.0, ease: 'power2.out' }, 26.0);
+    tl.fromTo('#endLogo',
+      { opacity: 0, scale: 0.5, rotation: -180 },
+      { opacity: 1, scale: 1, rotation: 0, duration: 0.85, ease: 'back.out(1.7)' }, 26.1);
+
+    tl.to('#endTitleLine1 .letter',
+      { opacity: 1, y: 0, duration: 0.5, stagger: 0.028, ease: 'power3.out' }, 26.45);
+    tl.to('#endTitleLine2 .letter',
+      { opacity: 1, y: 0, duration: 0.5, stagger: 0.024, ease: 'power3.out' }, 26.95);
+
+    tl.fromTo('#endMeta', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 27.85);
+
+    // Final particle burst
+    tl.to('.particle', {
+      opacity: 0.7, scale: 2.4, duration: 1.5,
+      stagger: { each: 0.012, from: 'center' }, ease: 'power2.out'
+    }, 26.5);
+
+    tl.to('#ending', { opacity: 0, duration: 0.4, ease: 'power2.in' }, 29.55);
+
+    // Pad to 30s
+    tl.to({}, { duration: 0.05 }, 30.0);
+  </script>
+</body>
+</html>

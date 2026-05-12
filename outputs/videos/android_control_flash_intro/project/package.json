@@ -1,0 +1,13 @@
+{
+  "name": "android-control-flash-intro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.4.45 preview",
+    "check": "npx --yes hyperframes@0.4.45 lint && npx --yes hyperframes@0.4.45 inspect",
+    "render": "npx --yes hyperframes@0.4.45 render"
+  },
+  "dependencies": {
+    "gsap": "^3.14.2"
+  }
+}
